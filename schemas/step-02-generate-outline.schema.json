@@ -1,0 +1,41 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.local/schemas/step-02-generate-outline.schema.json",
+    "title": "Step 02 Contract: Generate Scenario Outline",
+    "type": "object",
+    "required": [
+        "input",
+        "output"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "input": {
+            "type": "object",
+            "required": [
+                "scenario_idea",
+                "character_profiles"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "scenario_idea": {
+                    "$ref": "input.schema.json#/properties/scenario_idea"
+                },
+                "character_profiles": {
+                    "$ref": "character-profiles.schema.json"
+                }
+            }
+        },
+        "output": {
+            "type": "object",
+            "required": [
+                "scenario_outline"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "scenario_outline": {
+                    "$ref": "scenario-outline.schema.json"
+                }
+            }
+        }
+    }
+}

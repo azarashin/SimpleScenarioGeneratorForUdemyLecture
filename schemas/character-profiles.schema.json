@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/character-profiles.schema.json",
+  "title": "Character Profiles",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "required": [
+      "character_id",
+      "name",
+      "role",
+      "personality",
+      "speech",
+      "appearance",
+      "emotion_model"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "character_id": { "$ref": "common.schema.json#/$defs/characterId" },
+      "name": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+      "role": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+      "personality": {
+        "type": "object",
+        "required": ["core_traits", "values", "weaknesses"],
+        "additionalProperties": false,
+        "properties": {
+          "core_traits": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+          },
+          "values": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+          },
+          "weaknesses": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+          }
+        }
+      },
+      "speech": {
+        "type": "object",
+        "required": ["style", "first_person", "verbal_tics"],
+        "additionalProperties": false,
+        "properties": {
+          "style": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "first_person": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "verbal_tics": {
+            "type": "array",
+            "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+          }
+        }
+      },
+      "appearance": {
+        "type": "object",
+        "required": ["age_impression", "features", "costume"],
+        "additionalProperties": false,
+        "properties": {
+          "age_impression": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "features": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+          },
+          "costume": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+        }
+      },
+      "emotion_model": {
+        "type": "object",
+        "required": ["available_expressions"],
+        "additionalProperties": false,
+        "properties": {
+          "available_expressions": {
+            "type": "array",
+            "minItems": 1,
+            "contains": { "const": "neutral" },
+            "items": { "$ref": "common.schema.json#/$defs/expression" }
+          }
+        }
+      }
+    }
+  },
+  "uniqueItems": true
+}

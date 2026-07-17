@@ -1,0 +1,37 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.local/schemas/step-01-generate-character-profiles.schema.json",
+    "title": "Step 01 Contract: Generate Character Profiles",
+    "type": "object",
+    "required": [
+        "input",
+        "output"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "input": {
+            "type": "object",
+            "required": [
+                "character_overviews"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "character_overviews": {
+                    "$ref": "input.schema.json#/properties/character_overviews"
+                }
+            }
+        },
+        "output": {
+            "type": "object",
+            "required": [
+                "character_profiles"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "character_profiles": {
+                    "$ref": "character-profiles.schema.json"
+                }
+            }
+        }
+    }
+}

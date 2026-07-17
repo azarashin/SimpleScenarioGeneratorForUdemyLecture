@@ -1,0 +1,41 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.local/schemas/step-04-generate-sections.schema.json",
+    "title": "Step 04 Contract: Generate Scenario Sections",
+    "type": "object",
+    "required": [
+        "input",
+        "output"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "input": {
+            "type": "object",
+            "required": [
+                "character_profiles",
+                "scenario_outline"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "character_profiles": {
+                    "$ref": "character-profiles.schema.json"
+                },
+                "scenario_outline": {
+                    "$ref": "scenario-outline.schema.json"
+                }
+            }
+        },
+        "output": {
+            "type": "object",
+            "required": [
+                "scenario_sections"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "scenario_sections": {
+                    "$ref": "scenario-sections.schema.json"
+                }
+            }
+        }
+    }
+}
