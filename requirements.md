@@ -143,6 +143,44 @@
 
 ---
 
+## 3. 出力定義
+
+最終成果物として、章ごと・節ごとに分割されたHTMLと、セリフごとの話者画像表示を提供する。
+
+### 3-1. 章ごと・節ごとのHTML（rendered_html_pages）
+- 生成元: `scenario_sections` + `dialogue_expression_tags` + `character_image_assets`
+- 出力形式: HTMLファイル群
+- 想定ディレクトリ構成:
+  - `output/index.html`: 目次ページ
+  - `output/chapter-{chapter_no}/index.html`: 章トップページ
+  - `output/chapter-{chapter_no}/section-{section_no}.html`: 節ページ
+- 各節ページの必須表示要素:
+  - 作品タイトル
+  - 章番号・章タイトル
+  - 節番号・節タイトル
+  - 本文ブロック（地の文/セリフ）
+  - ナビゲーション（前節・次節・章トップ・目次）
+- 受け入れ条件:
+  - `scenario_outline` の全章・全節に対応するHTMLが生成される。
+  - リンク切れ（目次、章、節、前後遷移）がない。
+  - 文字コードは UTF-8 とする。
+
+### 3-2. セリフごとの話者画像表示（dialogue_speaker_image_rendering）
+- 生成元: `dialogue_expression_tags` + `character_image_assets`
+- 適用対象: 各節ページ内の `type=dialogue` ブロック
+- 必須表示仕様:
+  - 各セリフに対して話者名を表示する。
+  - 各セリフに対して `speaker_id` と `expression` に対応する画像を表示する。
+  - 表情画像が存在しない場合は、同一話者の `base_image_path` をフォールバック表示する。
+  - 画像には代替テキスト（alt）を設定する。
+    - 形式: `{話者名} - {expression}`（フォールバック時は `{話者名} - base`）
+- 受け入れ条件:
+  - `dialogue_expression_tags` の全 dialogue レコードが表示上で対応付けられる。
+  - 各セリフに話者名と画像が1つずつ表示される。
+  - 画像ファイル未存在時でもページ生成自体は失敗せず、プレースホルダーまたは代替表示で継続できる。
+
+---
+
 ## 最小入力サンプル（JSON）
 
 ```json
