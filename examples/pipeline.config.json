@@ -1,0 +1,16 @@
+{
+  "model_name": "gpt-5.3-codex",
+  "temperature": 0.6,
+  "max_retries": 2,
+  "output_root": "output",
+  "artifacts_dir_name": "artifacts",
+  "state_file_name": "run-state.json",
+  "trace_file_name": "trace.jsonl",
+  "image_generation": {
+    "provider": "mock",
+    "model": "image-mock-v1",
+    "width": 1024,
+    "height": 1024,
+    "style_preset": "anime"
+  }
+}
