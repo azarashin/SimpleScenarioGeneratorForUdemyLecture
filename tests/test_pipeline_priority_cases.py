@@ -144,7 +144,6 @@ def test_p1_force_true_reexecutes_completed_step(make_context) -> None:
     assert out["v"] == 2
 
 
-@pytest.mark.xfail(reason="Current implementation does not explicitly reject unknown from-step")
 def test_p1_unknown_from_step_should_error(make_context) -> None:
     """P1: unknown from-step should fail fast with explicit error."""
     context, _ = make_context()
