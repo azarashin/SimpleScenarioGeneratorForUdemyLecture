@@ -1,0 +1,37 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.local/schemas/step-03-generate-character-images.schema.json",
+    "title": "Step 03 Contract: Generate Character Images",
+    "type": "object",
+    "required": [
+        "input",
+        "output"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "input": {
+            "type": "object",
+            "required": [
+                "character_profiles"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "character_profiles": {
+                    "$ref": "character-profiles.schema.json"
+                }
+            }
+        },
+        "output": {
+            "type": "object",
+            "required": [
+                "character_image_assets"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "character_image_assets": {
+                    "$ref": "character-image-assets.schema.json"
+                }
+            }
+        }
+    }
+}

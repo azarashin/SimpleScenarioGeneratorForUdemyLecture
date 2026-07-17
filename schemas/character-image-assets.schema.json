@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/character-image-assets.schema.json",
+  "title": "Character Image Assets",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "required": ["character_id", "base_image_path", "expression_images"],
+    "additionalProperties": false,
+    "properties": {
+      "character_id": { "$ref": "common.schema.json#/$defs/characterId" },
+      "base_image_path": { "$ref": "common.schema.json#/$defs/filePath" },
+      "expression_images": {
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": { "$ref": "common.schema.json#/$defs/expression" },
+        "additionalProperties": { "$ref": "common.schema.json#/$defs/filePath" }
+      }
+    }
+  }
+}

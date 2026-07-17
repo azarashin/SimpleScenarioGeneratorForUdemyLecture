@@ -1,0 +1,53 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.local/schemas/step-06-render-html.schema.json",
+    "title": "Step 06 Contract: Render HTML",
+    "type": "object",
+    "required": [
+        "input",
+        "output"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "input": {
+            "type": "object",
+            "required": [
+                "scenario_outline",
+                "scenario_sections",
+                "dialogue_expression_tags",
+                "character_image_assets"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "scenario_outline": {
+                    "$ref": "scenario-outline.schema.json"
+                },
+                "scenario_sections": {
+                    "$ref": "scenario-sections.schema.json"
+                },
+                "dialogue_expression_tags": {
+                    "$ref": "dialogue-expression-tags.schema.json"
+                },
+                "character_image_assets": {
+                    "$ref": "character-image-assets.schema.json"
+                }
+            }
+        },
+        "output": {
+            "type": "object",
+            "required": [
+                "rendered_html_pages",
+                "dialogue_speaker_image_rendering"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "rendered_html_pages": {
+                    "$ref": "rendered-html-pages.schema.json"
+                },
+                "dialogue_speaker_image_rendering": {
+                    "$ref": "dialogue-speaker-image-rendering.schema.json"
+                }
+            }
+        }
+    }
+}

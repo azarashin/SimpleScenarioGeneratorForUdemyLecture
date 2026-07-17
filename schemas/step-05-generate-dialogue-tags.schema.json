@@ -1,0 +1,41 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.local/schemas/step-05-generate-dialogue-tags.schema.json",
+    "title": "Step 05 Contract: Generate Dialogue Expression Tags",
+    "type": "object",
+    "required": [
+        "input",
+        "output"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "input": {
+            "type": "object",
+            "required": [
+                "character_profiles",
+                "scenario_sections"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "character_profiles": {
+                    "$ref": "character-profiles.schema.json"
+                },
+                "scenario_sections": {
+                    "$ref": "scenario-sections.schema.json"
+                }
+            }
+        },
+        "output": {
+            "type": "object",
+            "required": [
+                "dialogue_expression_tags"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "dialogue_expression_tags": {
+                    "$ref": "dialogue-expression-tags.schema.json"
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/common.schema.json",
+  "title": "Scenario Pipeline Common Types",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "characterId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "expression": {
+      "type": "string",
+      "minLength": 1
+    },
+    "filePath": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
