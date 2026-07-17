@@ -1,0 +1,26 @@
+{
+  "scenario_idea": {
+    "title": "時空図書館の見習い",
+    "genre": "ファンタジー",
+    "theme": "記憶と選択",
+    "premise": "失われた記憶を本として管理する図書館で、見習い司書が禁書事件に巻き込まれる。",
+    "target_length": {
+      "chapter_count": 2,
+      "sections_per_chapter": 2
+    }
+  },
+  "character_overviews": [
+    {
+      "character_id": "c001",
+      "name": "アオイ",
+      "role": "主人公",
+      "summary": "新米の見習い司書。観察力が高いが、自信が持てない。"
+    },
+    {
+      "character_id": "c002",
+      "name": "レイ",
+      "role": "相棒",
+      "summary": "図書館の巡回係。冷静で実務的。"
+    }
+  ]
+}
