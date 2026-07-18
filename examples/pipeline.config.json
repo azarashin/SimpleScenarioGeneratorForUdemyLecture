@@ -40,6 +40,10 @@
     "model": "chat-gpt-image-2",
     "width": 1024,
     "height": 1024,
-    "style_preset": "anime"
+    "style_preset": "anime",
+    "quality": "high",
+    "output_format": "png",
+    "timeout_seconds": 120,
+    "api_key_env": "OPENAI_API_KEY"
   }
 }

@@ -51,6 +51,10 @@ def main() -> None:
         ),
         image_generation_provider=create_image_generation_provider(
             config.image_generation.provider,
+            quality=config.image_generation.quality,
+            output_format=config.image_generation.output_format,
+            timeout_seconds=config.image_generation.timeout_seconds,
+            api_key_env=config.image_generation.api_key_env,
         ),
     )
 

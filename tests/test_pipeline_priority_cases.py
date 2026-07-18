@@ -259,6 +259,10 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     assert conf.temperature_policy == TemperaturePolicyConfig()
     assert conf.image_generation.provider == "stub"
     assert conf.image_generation.model == ImageGenerationConfig().model
+    assert conf.image_generation.quality == "high"
+    assert conf.image_generation.output_format == "png"
+    assert conf.image_generation.timeout_seconds == 120
+    assert conf.image_generation.api_key_env == "OPENAI_API_KEY"
 
 
 def test_p1_cli_like_integration_creates_core_outputs(make_context) -> None:

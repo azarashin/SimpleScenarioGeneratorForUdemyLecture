@@ -16,8 +16,8 @@
 
 ## 画像生成設定
 
-画像生成は `ImageGenerationProvider` を介して実行します。現在利用できる `mock` プロバイダーは、
-外部APIを呼び出さず、ローカル実行とテスト用の決定的なPNG画像を返します。
+画像生成は `ImageGenerationProvider` を介して実行します。`mock` は外部APIを呼び出さず、
+ローカル実行とテスト用の決定的なPNG画像を返します。`openai` はOpenAI Image APIへ接続します。
 
 ```json
 {
@@ -26,13 +26,23 @@
     "model": "chat-gpt-image-2",
     "width": 1024,
     "height": 1024,
-    "style_preset": "anime"
+    "style_preset": "anime",
+    "quality": "high",
+    "output_format": "png",
+    "timeout_seconds": 120,
+    "api_key_env": "OPENAI_API_KEY"
   }
 }
 ```
 
-実画像を生成するプロバイダーは未実装です。現在の画像生成ステップは `mock` により動作し、
-実APIを利用する際は同じインターフェースへプロバイダーを追加します。
+実画像の生成には `provider` を `openai` に変更し、`api_key_env` で指定した環境変数へAPIキーを
+設定します。基本画像はOpenAI Image APIの生成エンドポイント、表情差分は基本画像を参照する編集
+エンドポイントを使用します。設定名 `chat-gpt-image-2` はAPI呼び出し時に公式モデルID
+`gpt-image-2` へ変換されます。
+
+```powershell
+$env:OPENAI_API_KEY = "your-api-key"
+```
 
 画像成果物の保存前には、キャラクターIDと表情の網羅性、相対パスの安全性、ファイルの存在、
 PNG・JPEG・WebP形式、拡張子、画像寸法を検証します。不完全または破損した画像がある場合、

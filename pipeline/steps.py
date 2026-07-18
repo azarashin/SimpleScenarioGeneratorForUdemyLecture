@@ -163,6 +163,7 @@ class GenerateCharacterImagesStep(Step):
                 character_dir=character_dir,
                 checkpoint_path=checkpoint_root / character_id / "base.json",
                 run_root=run_root,
+                reference_image_path=None,
             )
             expression_images = {"neutral": base_relative}
 
@@ -190,6 +191,7 @@ class GenerateCharacterImagesStep(Step):
                     / character_id
                     / f"{image_stem}.json",
                     run_root=run_root,
+                    reference_image_path=run_root / base_relative,
                 )
 
             assets.append(
@@ -229,8 +231,19 @@ class GenerateCharacterImagesStep(Step):
         character_dir: Path,
         checkpoint_path: Path,
         run_root: Path,
+        reference_image_path: Path | None,
     ) -> str:
         config = context.config.image_generation
+        reference_image_bytes = (
+            reference_image_path.read_bytes()
+            if reference_image_path is not None
+            else None
+        )
+        reference_image_hash = (
+            hashlib.sha256(reference_image_bytes).hexdigest()
+            if reference_image_bytes is not None
+            else None
+        )
         request_hash = self._request_hash(
             rendered_hash=prompt.rendered_hash,
             provider=config.provider,
@@ -238,7 +251,10 @@ class GenerateCharacterImagesStep(Step):
             width=config.width,
             height=config.height,
             style_preset=config.style_preset,
+            quality=config.quality,
+            output_format=config.output_format,
             label=label,
+            reference_image_hash=reference_image_hash,
         )
         if not context.force:
             checkpoint_image = self._load_image_checkpoint(
@@ -267,6 +283,12 @@ class GenerateCharacterImagesStep(Step):
             width=config.width,
             height=config.height,
             style_preset=config.style_preset,
+            reference_image_bytes=reference_image_bytes,
+            reference_mime_type=(
+                self._mime_type_for_path(reference_image_path)
+                if reference_image_path is not None
+                else None
+            ),
         )
         self._validate_image_content(
             response.image_bytes,
@@ -309,7 +331,10 @@ class GenerateCharacterImagesStep(Step):
         width: int,
         height: int,
         style_preset: str,
+        quality: str,
+        output_format: str,
         label: str,
+        reference_image_hash: str | None,
     ) -> str:
         payload = json.dumps(
             {
@@ -319,7 +344,10 @@ class GenerateCharacterImagesStep(Step):
                 "width": width,
                 "height": height,
                 "style_preset": style_preset,
+                "quality": quality,
+                "output_format": output_format,
                 "label": label,
+                "reference_image_hash": reference_image_hash,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -437,6 +465,19 @@ class GenerateCharacterImagesStep(Step):
             return extensions[mime_type.casefold()]
         except KeyError as exc:
             raise ValueError(f"Unsupported generated image MIME type: {mime_type}") from exc
+
+    @staticmethod
+    def _mime_type_for_path(path: Path) -> str:
+        mime_types = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+        }
+        try:
+            return mime_types[path.suffix.casefold()]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported reference image extension: {path.suffix}") from exc
 
     @staticmethod
     def _expression_filename(expression: str) -> str:

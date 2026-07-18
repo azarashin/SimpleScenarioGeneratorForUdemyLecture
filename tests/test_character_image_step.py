@@ -27,6 +27,8 @@ class FailSecondImageOnceProvider(ImageGenerationProvider):
         width: int,
         height: int,
         style_preset: str,
+        reference_image_bytes: bytes | None = None,
+        reference_mime_type: str | None = None,
     ):
         self.calls += 1
         if self.calls == 2:
@@ -37,6 +39,8 @@ class FailSecondImageOnceProvider(ImageGenerationProvider):
             width=width,
             height=height,
             style_preset=style_preset,
+            reference_image_bytes=reference_image_bytes,
+            reference_mime_type=reference_mime_type,
         )
 
 
@@ -66,6 +70,9 @@ def test_character_image_step_generates_base_and_expression_assets(make_context)
         assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert len(provider.requests) == 3
     assert provider.requests[0].model == "chat-gpt-image-2"
+    assert provider.requests[0].reference_image_hash is None
+    assert provider.requests[1].reference_image_hash is not None
+    assert provider.requests[2].reference_image_hash is not None
 
 
 def test_character_image_step_records_artifact_and_trace(make_context) -> None:
