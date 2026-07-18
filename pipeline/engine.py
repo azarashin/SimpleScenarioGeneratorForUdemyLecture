@@ -197,10 +197,12 @@ class StepExecutionEngine:
 
                 artifact_path = Path(context.artifacts_dir) / f"{step.name}.json"
                 artifact_path.parent.mkdir(parents=True, exist_ok=True)
-                artifact_path.write_text(
+                temp_artifact_path = artifact_path.with_suffix(".tmp")
+                temp_artifact_path.write_text(
                     json.dumps(result.output, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
+                temp_artifact_path.replace(artifact_path)
 
                 context.shared_data.update(result.output)
                 context.state_store.upsert_step(

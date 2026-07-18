@@ -63,6 +63,22 @@ class AlwaysFailProvider(TextGenerationProvider):
         raise ConnectionError("provider unavailable")
 
 
+class FailAfterFirstSectionProvider(TextGenerationProvider):
+    def __init__(self) -> None:
+        self.delegate = ScenarioBodyMockTextGenerationProvider()
+        self.calls = 0
+
+    def generate_json(self, *, prompt: str, model: str, temperature: float):
+        self.calls += 1
+        if self.calls > 1:
+            raise ConnectionError("second section unavailable")
+        return self.delegate.generate_json(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+        )
+
+
 class FakeResponsesClient:
     def __init__(self, output_text: str) -> None:
         self.output_text = output_text
@@ -192,6 +208,11 @@ def test_section_retry_reuses_completed_checkpoint(make_context) -> None:
 
     assert len(output["scenario_sections"]) == 2
     assert provider.calls == 3
+    integrated_artifact = (
+        Path(context.artifacts_dir) / "step-03-generate-sections.json"
+    )
+    integrated = json.loads(integrated_artifact.read_text(encoding="utf-8"))
+    assert len(integrated["scenario_sections"]) == 2
     assert any(
         event.get("event") == "section_checkpoint_loaded"
         and event.get("section_no") == 1
@@ -347,4 +368,44 @@ def test_section_fallback_fails_without_saving_synthetic_content(make_context) -
         and "no synthetic fallback content was saved" in event.get("failure_reason", "")
         for event in trace.events
         if event.get("event") == "step_failed"
+    )
+
+
+def test_failed_run_keeps_completed_section_and_resume_only_generates_missing_one(
+    make_context,
+) -> None:
+    context, trace = make_context()
+    context.shared_data["input"]["scenario_idea"]["target_length"] = {
+        "chapter_count": 1,
+        "sections_per_chapter": 2,
+    }
+    failing_provider = FailAfterFirstSectionProvider()
+    context.text_generation_provider = failing_provider
+    engine = StepExecutionEngine(build_minimal_steps())
+
+    with pytest.raises(RuntimeError, match="Step failed: step-03-generate-sections"):
+        engine.run(context)
+
+    checkpoint_dir = Path(context.artifacts_dir) / "sections"
+    assert (checkpoint_dir / "chapter-001-section-001.json").exists()
+    assert not (checkpoint_dir / "chapter-001-section-002.json").exists()
+    integrated_artifact = (
+        Path(context.artifacts_dir) / "step-03-generate-sections.json"
+    )
+    assert not integrated_artifact.exists()
+
+    resumed_provider = ScenarioBodyMockTextGenerationProvider()
+    context.text_generation_provider = resumed_provider
+    output = engine.run(
+        context,
+        options=ExecutionOptions(from_step="step-03-generate-sections"),
+    )
+
+    assert len(output["scenario_sections"]) == 2
+    assert len(resumed_provider.requests) == 1
+    assert integrated_artifact.exists()
+    assert any(
+        event.get("event") == "section_checkpoint_loaded"
+        and event.get("section_no") == 1
+        for event in trace.events
     )

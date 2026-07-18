@@ -39,7 +39,10 @@ allowed character IDs, the output schema bundle, and narration/dialogue constrai
 
 Scenario sections are generated and schema-validated sequentially. Each accepted
 section is atomically checkpointed under `artifacts/sections/`; retries reload valid
-checkpoints and resume from the first missing or invalid section.
+checkpoints and resume from the first missing or invalid section. The integrated
+`step-03-generate-sections.json` artifact is also written atomically, and only after
+every outlined section has completed successfully. A failed run therefore keeps its
+valid section checkpoints but does not publish a partial integrated artifact.
 
 The mock outline assigns a distinct purpose and required events to every section, and
 the scenario-body mock carries the previous section summary and events into the next
