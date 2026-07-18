@@ -1,5 +1,22 @@
 # キャラクター画像生成ガイド
 
+## キャラクター画像の解決
+
+`CharacterAssetResolver` は `character_image_assets` と `character_profiles` を
+キャラクターIDで索引化し、`resolve(character_id, expression)` で画像を解決します。
+指定表情が利用できない場合は基本画像へフォールバックし、どちらも利用できない
+場合は `image_path=None` を返します。HTML出力先のディレクトリを `relative_to` に
+渡すと、画像パスはそのページから参照できるURLへ変換されます。
+
+```python
+resolver = CharacterAssetResolver.from_pipeline_data(
+    shared_data,
+    run_root=run_root,
+    verify_files=True,
+)
+image = resolver.resolve("c001", "smile", relative_to="chapter-1")
+```
+
 ## 概要
 
 `step-03-generate-character-images` は、キャラクターごとに次の処理を行います。

@@ -6,6 +6,8 @@ from pathlib import Path
 from string import Template
 from typing import Any, Iterable
 
+from .asset_manager import CharacterAssetResolver, ResolvedCharacterImage
+
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -158,6 +160,7 @@ def render_section_page(
     section: dict[str, Any],
     dialogue_tags: Iterable[dict[str, Any]] = (),
     characters: dict[str, dict[str, Any]] | None = None,
+    asset_resolver: CharacterAssetResolver | None = None,
     outline: dict[str, Any] | None = None,
     previous_href: str | None = None,
     next_href: str | None = None,
@@ -193,11 +196,22 @@ def render_section_page(
             continue
 
         tag = tag_by_block.get(str(block["block_id"]), {})
+        expression = str(tag.get("expression", "base"))
+        resolved_image = (
+            asset_resolver.resolve(
+                str(block["speaker_id"]),
+                expression,
+                relative_to=f"chapter-{chapter_no}",
+            )
+            if asset_resolver is not None
+            else None
+        )
         blocks.append(
             render_dialogue_row(
                 block=block,
-                expression=str(tag.get("expression", "base")),
+                expression=expression,
                 character=character_map.get(str(block["speaker_id"]), {}),
+                resolved_image=resolved_image,
             )
         )
 
@@ -215,28 +229,46 @@ def render_section_page(
 
 
 def render_dialogue_row(
-    *, block: dict[str, Any], expression: str, character: dict[str, Any]
+    *,
+    block: dict[str, Any],
+    expression: str,
+    character: dict[str, Any],
+    resolved_image: ResolvedCharacterImage | None = None,
 ) -> str:
     """Render one dialogue block as one speaker/image/text row."""
     block_id = str(block["block_id"])
     speaker_id = str(block["speaker_id"])
-    speaker_name = str(character.get("name", speaker_id))
-    expression_images = character.get("expression_images", {})
-    expression_path = expression_images.get(expression)
-    image_path = expression_path or character.get("base_image_path")
-    rendered_expression = expression if expression_path else "base"
+    speaker_name = (
+        resolved_image.speaker_name
+        if resolved_image is not None
+        else str(character.get("name", speaker_id))
+    )
+    if resolved_image is not None:
+        image_path = resolved_image.image_path
+        image_alt = resolved_image.alt
+    else:
+        expression_images = character.get("expression_images", {})
+        expression_path = expression_images.get(expression)
+        image_path = expression_path or character.get("base_image_path")
+        rendered_expression = expression if expression_path else "base"
+        image_alt = f"{speaker_name} - {rendered_expression}"
 
     if image_path:
         portrait = '<img src="{0}" alt="{1}" loading="lazy">'.format(
             escape(str(image_path), quote=True),
-            escape(f"{speaker_name} - {rendered_expression}", quote=True),
+            escape(image_alt, quote=True),
         )
     else:
         initial = speaker_name[:1] or "?"
         portrait = (
             '<span class="portrait-placeholder" role="img" aria-label="{0}">{1}</span>'
         ).format(
-            escape(f"{speaker_name} - image unavailable", quote=True),
+            escape(
+                resolved_image.alt
+                if resolved_image is not None
+                else f"{speaker_name} - image unavailable",
+                quote=True,
+            ),
             escape(initial),
         )
 
