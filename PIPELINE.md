@@ -9,6 +9,8 @@ Implemented minimal steps:
 - step-02-generate-outline
 - step-03-generate-sections
 
+The generation contract for scenario sections is defined in `SCENARIO_BODY_SPEC.md`.
+
 ## Run
 
 ```powershell
