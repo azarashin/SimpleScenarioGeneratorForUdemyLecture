@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
+import pytest
+
+from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyChecker
 from pipeline.engine import StepExecutionEngine
 from pipeline.image_generation import MockImageGenerationProvider
 from pipeline.steps import GenerateCharacterImagesStep, GenerateCharacterProfilesStep
@@ -54,3 +58,63 @@ def test_character_image_step_records_artifact_and_trace(make_context) -> None:
     assert succeeded[0]["model"] == "chat-gpt-image-2"
     assert succeeded[0]["prompt_version"] == "v1"
     assert len(succeeded[0]["prompt_hash"]) == 64
+
+
+def test_image_asset_consistency_rejects_missing_expression(make_context) -> None:
+    context, _ = make_context()
+    output = StepExecutionEngine(
+        [GenerateCharacterProfilesStep(), GenerateCharacterImagesStep()]
+    ).run(context)
+    assets = deepcopy(output["character_image_assets"])
+    del assets[0]["expression_images"]["sad"]
+
+    with pytest.raises(ConsistencyCheckError, match="missing expressions.*sad"):
+        PipelineConsistencyChecker().check(
+            output,
+            {"character_image_assets": assets},
+            run_root=Path(context.artifacts_dir).parent,
+        )
+
+
+def test_image_asset_consistency_rejects_missing_or_corrupt_file(make_context) -> None:
+    context, _ = make_context()
+    output = StepExecutionEngine(
+        [GenerateCharacterProfilesStep(), GenerateCharacterImagesStep()]
+    ).run(context)
+    run_root = Path(context.artifacts_dir).parent
+    happy_path = (
+        run_root
+        / output["character_image_assets"][0]["expression_images"]["happy"]
+    )
+    happy_path.write_bytes(b"not an image")
+
+    with pytest.raises(ConsistencyCheckError, match="not a supported image"):
+        PipelineConsistencyChecker().check(
+            output,
+            {"character_image_assets": output["character_image_assets"]},
+            run_root=run_root,
+        )
+
+    happy_path.unlink()
+    with pytest.raises(ConsistencyCheckError, match="file does not exist"):
+        PipelineConsistencyChecker().check(
+            output,
+            {"character_image_assets": output["character_image_assets"]},
+            run_root=run_root,
+        )
+
+
+def test_image_asset_consistency_rejects_unsafe_path(make_context) -> None:
+    context, _ = make_context()
+    output = StepExecutionEngine(
+        [GenerateCharacterProfilesStep(), GenerateCharacterImagesStep()]
+    ).run(context)
+    assets = deepcopy(output["character_image_assets"])
+    assets[0]["base_image_path"] = "../outside.png"
+
+    with pytest.raises(ConsistencyCheckError, match="safe relative path"):
+        PipelineConsistencyChecker().check(
+            output,
+            {"character_image_assets": assets},
+            run_root=Path(context.artifacts_dir).parent,
+        )
