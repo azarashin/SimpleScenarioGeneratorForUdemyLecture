@@ -6,7 +6,7 @@
     "api_key_env": "TEXT_GENERATION_API_KEY"
   },
   "scenario_body_generation": {
-    "min_characters": 1400,
+    "min_characters": 1000,
     "max_characters": 3200,
     "min_dialogue_blocks": 20,
     "max_dialogue_blocks": 40,

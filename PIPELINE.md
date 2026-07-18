@@ -1,20 +1,24 @@
-# Minimal Pipeline Runner
+# 最小パイプライン実行ガイド
 
-## Overview
+## 概要
 
-This project includes a minimal executable pipeline built on top of the step engine.
+このプロジェクトには、ステップ実行エンジン上に構築した最小構成のシナリオ生成パイプラインがあります。
 
-Implemented minimal steps:
-- step-01-generate-character-profiles
-- step-02-generate-outline
-- step-03-generate-sections
+現在実装されているステップは次のとおりです。
 
-The generation contract for scenario sections is defined in `SCENARIO_BODY_SPEC.md`.
-Text generation is accessed through `TextGenerationProvider`; local runs and tests use
-the deterministic `MockTextGenerationProvider` implementation.
+- `step-01-generate-character-profiles`: 登場人物プロフィール生成
+- `step-02-generate-outline`: シナリオアウトライン生成
+- `step-03-generate-sections`: 章・節本文生成
 
-Text generation connection settings live under `text_generation`. Store only the API
-key environment-variable name in JSON; never put the secret itself in configuration.
+シナリオ本文の生成契約は `SCENARIO_BODY_SPEC.md`、会話量を増やすための考え方と調整方法は
+`SCENARIO_GENERATION_KNOWHOW.md` を参照してください。
+
+## テキスト生成設定
+
+テキスト生成は `TextGenerationProvider` を経由します。ローカル実行とテストでは決定的なモック実装を利用できます。
+
+接続設定は `text_generation` に記述します。APIキーそのものを設定ファイルへ保存せず、
+APIキーを格納する環境変数名だけを指定してください。
 
 ```json
 {
@@ -27,32 +31,35 @@ key environment-variable name in JSON; never put the secret itself in configurat
 }
 ```
 
-For a future network-backed provider, set the secret in the process environment:
+PowerShellで環境変数を設定する例です。
 
 ```powershell
 $env:TEXT_GENERATION_API_KEY = "your-api-key"
 ```
 
-Scenario-section prompt `v2` is rendered once per target section. It includes the
-scenario idea, character profiles, chapter and section outline, previous state,
-allowed character IDs, the output schema bundle, and narration/dialogue constraints.
+OpenAI Responses APIを使用する場合は、`requirements.txt` の依存関係をインストールし、
+`text_generation.provider` を `openai` に変更します。OpenAI用の設定例は
+`examples/pipeline.openai.config.json` にあります。
 
-Scenario sections are generated and schema-validated sequentially. Each accepted
-section is atomically checkpointed under `artifacts/sections/`; retries reload valid
-checkpoints and resume from the first missing or invalid section. The integrated
-`step-03-generate-sections.json` artifact is also written atomically, and only after
-every outlined section has completed successfully. A failed run therefore keeps its
-valid section checkpoints but does not publish a partial integrated artifact.
+## シナリオ本文生成
 
-The mock outline assigns a distinct purpose and required events to every section, and
-the scenario-body mock carries the previous section summary and events into the next
-section. Generated bodies must contain narration and dialogue, stay within the
-configured non-whitespace character range, and mention every required event.
+セクション生成プロンプト`v2`は、アウトラインの各セクションに対して個別にレンダリングされます。
+プロンプトには次の情報が含まれます。
+
+- シナリオアイデア
+- 登場人物プロフィール
+- 対象の章とセクション
+- 前セクションから引き継いだ状態
+- 発言可能なキャラクターID
+- 出力JSON Schema
+- ナレーション、セリフ数、文字数などの品質条件
+
+各セクションはアウトライン順に生成され、スキーマ・整合性・品質検証を通過したものだけが保存されます。
 
 ```json
 {
   "scenario_body_generation": {
-    "min_characters": 1400,
+    "min_characters": 1000,
     "max_characters": 3200,
     "min_dialogue_blocks": 20,
     "max_dialogue_blocks": 40,
@@ -61,88 +68,126 @@ configured non-whitespace character range, and mention every required event.
 }
 ```
 
-To use the real OpenAI Responses API provider, install `requirements.txt`, set the
-configured API-key environment variable, and change `text_generation.provider` to
-`openai`. The provider requests strict JSON-schema output and never persists the key.
-The returned text must be exactly one JSON object (surrounding whitespace is allowed).
-Markdown code fences, explanatory prose, trailing content, arrays at the root, and
-duplicate object keys are rejected as response-format errors. These failures enter the
-normal retry strategy; only parsed, schema-valid, consistency-checked data is saved.
+文字数は空白を除いて計測します。セリフ数は `type=dialogue` のブロック数です。
+設定値の詳しい考え方は `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。
 
-## Run
+OpenAIプロバイダーはJSON Schemaに従った出力を要求します。返却内容は単一のJSONオブジェクトである必要があります。
+Markdownコードフェンス、説明文、JSON後方の余分な文章、ルート配列、重複キーは形式エラーとして拒否されます。
+
+## 実行方法
+
+モック設定で新規実行する例です。
 
 ```powershell
 python run_pipeline.py --config examples/pipeline.config.json --input examples/input.json
 ```
 
-## Resume
+OpenAIプロバイダーで実行する例です。
+
+```powershell
+python run_pipeline.py `
+  --config examples/pipeline.openai.config.json `
+  --input examples/input.json `
+  --run-id openai-scenario-001
+```
+
+## 既存実行の再開
 
 ```powershell
 python run_pipeline.py --run-id run-20260718-101010
 ```
 
-## Restart from a Step
+## 指定ステップからの再開
 
 ```powershell
-python run_pipeline.py --run-id run-20260718-101010 --from-step step-03-generate-sections
+python run_pipeline.py `
+  --config examples/pipeline.openai.config.json `
+  --run-id openai-scenario-001 `
+  --from-step step-03-generate-sections
 ```
 
-## Force Re-run
+## 強制再生成
 
 ```powershell
-python run_pipeline.py --run-id run-20260718-101010 --force
+python run_pipeline.py `
+  --config examples/pipeline.openai.config.json `
+  --run-id openai-scenario-001 `
+  --from-step step-03-generate-sections `
+  --force
 ```
 
-## Retry Strategy
+生成条件を変更するとプロンプトハッシュも変わり、ハッシュが一致しないチェックポイントは再生成されます。
 
-Retries run in separate phases: a short retry, a prompt-revision retry that receives
-the previous failure reason, and one final fallback attempt.
+## チェックポイントと状態引き継ぎ
+
+検証済みの各セクションは、次のディレクトリへアトミックに保存されます。
+
+```text
+output/<run-id>/artifacts/sections/
+```
+
+再試行や再開時には、有効なチェックポイントを読み込み、最初の未生成または無効なセクションから再開します。
+統合成果物 `step-03-generate-sections.json` は、全セクションが成功した後にだけ保存されます。
+失敗した実行でも、成功済みのセクションチェックポイントは保持されます。
+
+各チェックポイントの `state_after` には次の情報が保存され、次のセクションへ渡されます。
+
+- キャラクターの現在地
+- 所持品
+- 既知情報
+- 人間関係の変化
+- 発生済みイベント
+- 未解決のプロット
+- 直前のセクション全文
+
+再開時には状態もチェックポイントから復元します。保存された状態とセクション本文が一致しない場合、
+そのチェックポイントは無効として再生成します。
+
+## 再試行戦略
+
+再試行は、短時間再試行、プロンプト修正再試行、最終フォールバックのフェーズに分かれます。
 
 ```json
 {
   "retry_strategy": {
     "short_retries": 1,
-    "prompt_revision_retries": 1,
+    "prompt_revision_retries": 2,
     "fallback_enabled": true
   }
 }
 ```
 
-Model-backed steps can override `run_with_prompt_revision` and `run_fallback` to
-provide phase-specific behavior. Trace events and run state include `retry_phase`.
-Scenario-section generation uses the same prompt for `short_retry`, appends the
-previous validation error and a JSON-only correction instruction for
-`prompt_revision`, and deliberately fails during `fallback` after retries are
-exhausted. It never inserts placeholder or fixed text into production artifacts.
-Provider connection and timeout errors are routed directly to `short_retry`.
-Malformed JSON, schema violations, and consistency or quality errors are routed
-directly to `prompt_revision`; once the matching phase is exhausted, only the final
-configured fallback remains.
+- 接続エラーやタイムアウトは `short_retry` へ進みます。
+- JSON形式、スキーマ、整合性、品質のエラーは `prompt_revision` へ進みます。
+- プロンプト修正再試行では、前回の具体的な失敗理由をモデルへ渡します。
+- 本番のセクション生成では、固定文やプレースホルダーによる代替成果物を保存しません。
 
-## Consistency Checks
+## 整合性・品質検証
 
-Before an artifact is saved, the runner automatically rejects contradictions in
-character IDs, names, and roles; ambiguous normalized character names; unknown
-participants or speakers; duplicate block IDs; and chapter/section timeline drift.
-Failures enter the configured retry strategy and successful checks emit a
-`consistency_checked` trace event.
+成果物を保存する前に次を検証します。
 
-## Section State
+- キャラクターID、名前、役割の一貫性
+- 正規化後に曖昧になるキャラクター名
+- 未定義の参加者や話者
+- 重複したブロックID
+- 章・節の順序、番号、タイトル
+- 本文文字数
+- ナレーションとセリフの件数
+- 必須イベントの記述
 
-Each section checkpoint stores a validated `state_after` object alongside the
-generated section. It carries character locations, possessions, known information,
-relationship changes, occurred events, unresolved plot threads, and the complete
-previous section. The next section receives this object in its prompt. On resume, the
-pipeline restores state from the checkpoint and rejects a checkpoint whose saved
-state does not match its section. The complete previous section is retained for this
-initial implementation; it can later be replaced by a separately generated summary
-for long-form scenarios.
+品質検証に失敗したセクションは、次の形式で保存されます。
 
-## Temperature Policy
+```text
+output/<run-id>/artifacts/sections/chapter-NNN-section-NNN.rejected.json
+```
 
-Generation uses a low temperature by default. A higher diversity temperature is
-allowed only for explicitly listed creative steps; all other steps are fixed to the
-low value. A step result that reports another temperature is rejected.
+拒否ファイルには、失敗理由、実測した文字数とブロック数、要求値、生成されたセクション全文が含まれます。
+
+最終エラーには、具体的な理由、試行回数、最後の再試行フェーズ、状態ファイル、トレースログのパスが表示されます。
+
+## 温度ポリシー
+
+生成温度は通常低く設定し、明示的に許可した創作ステップだけ高い温度を利用します。
 
 ```json
 {
@@ -157,37 +202,38 @@ low value. A step result that reports another temperature is rejected.
 }
 ```
 
-Trace events record both `temperature` and `temperature_mode`.
+設定と異なる温度をステップが報告した場合、その結果は拒否されます。
+トレースには `temperature` と `temperature_mode` が記録されます。
 
-## Prompt Versions and Impact Comparison
+## プロンプトバージョン
 
-Prompts are stored in `prompts/catalog.json`. Pin versions per step so reruns remain
-reproducible; if omitted, the latest catalog version is selected. Every successful
-trace records `prompt_version` and a SHA-256 `prompt_hash`.
+プロンプトは `prompts/catalog.json` で管理します。再現性を保つため、設定ファイルでバージョンを固定できます。
+成功した実行のトレースには、プロンプトバージョンとSHA-256ハッシュが記録されます。
 
 ```json
 {
   "prompt_versions": {
     "step-01-generate-character-profiles": "v1",
-    "step-02-generate-outline": "v2",
-    "step-03-generate-sections": "v1"
+    "step-02-generate-outline": "v1",
+    "step-03-generate-sections": "v2"
   }
 }
 ```
 
-Compare two completed runs:
+2つの完了済み実行を比較する場合は次を使用します。
 
 ```powershell
 python compare_prompt_runs.py output/run-baseline output/run-candidate
 ```
 
-The report shows prompt changes and deltas for attempts, failures, duration, input
-and output tokens, plus whether each generated artifact changed.
+比較結果には、試行回数、失敗数、実行時間、入出力トークン、成果物変更の差分が表示されます。
 
-## Outputs
+## 出力ファイル
 
-Generated under `output/<run-id>/`:
-- `artifacts/*.json`
-- `run-state.json`
-- `trace.jsonl`
-- `summary.json`
+成果物は `output/<run-id>/` 以下へ生成されます。
+
+- `artifacts/*.json`: 各ステップの成果物
+- `artifacts/sections/*.json`: セクションごとのチェックポイント
+- `run-state.json`: ステップの実行状態
+- `trace.jsonl`: 詳細な実行トレース
+- `summary.json`: 完了したパイプラインの統合結果
