@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
-from pipeline.config import ImageGenerationConfig, load_config
+from pipeline.config import (
+    ImageGenerationConfig,
+    RetryStrategyConfig,
+    TemperaturePolicyConfig,
+    load_config,
+)
+from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyChecker
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
+from pipeline.prompt_impact import PromptImpactReporter
+from pipeline.prompts import PromptCatalog
+from pipeline.steps import GenerateCharacterProfilesStep, build_minimal_steps
 from pipeline.state import StepState
 from pipeline.types import Step, StepContext, StepResult
 
@@ -23,7 +33,7 @@ class ConstantOutputStep(Step):
             output=self.output,
             prompt=f"prompt:{self.name}",
             model="test-model",
-            temperature=0.1,
+            temperature=context.config.temperature_for(self.name),
             input_tokens=10,
             output_tokens=20,
         )
@@ -41,6 +51,49 @@ class FlakyStep(Step):
         if self.calls <= self.fail_times:
             raise RuntimeError(f"planned-fail-{self.calls}")
         return StepResult(output=self.output)
+
+
+class StrategyAwareStep(Step):
+    def __init__(self) -> None:
+        self.phases: list[str] = []
+        self.failure_reasons: list[str] = []
+
+    name = "strategy-aware"
+
+    def run(self, context: StepContext) -> StepResult:
+        phase = "initial" if not self.phases else "short_retry"
+        self.phases.append(phase)
+        raise RuntimeError(f"{phase}-failed")
+
+    def run_with_prompt_revision(
+        self, context: StepContext, failure_reason: str
+    ) -> StepResult:
+        self.phases.append("prompt_revision")
+        self.failure_reasons.append(failure_reason)
+        raise RuntimeError("prompt-revision-failed")
+
+    def run_fallback(self, context: StepContext, failure_reason: str) -> StepResult:
+        self.phases.append("fallback")
+        self.failure_reasons.append(failure_reason)
+        return StepResult(output={"fallback": True})
+
+
+class ContradictingProfileStep(GenerateCharacterProfilesStep):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, context: StepContext) -> StepResult:
+        self.calls += 1
+        result = super().run(context)
+        result.output["character_profiles"][0]["name"] = "inconsistent-name"
+        return result
+
+
+class TemperatureBypassStep(Step):
+    name = "temperature-bypass"
+
+    def run(self, context: StepContext) -> StepResult:
+        return StepResult(output={"ok": True}, temperature=1.5)
 
 
 def test_p0_skip_completed_step_and_load_artifact(make_context) -> None:
@@ -115,14 +168,39 @@ def test_p0_retry_and_failure_state_tracking(make_context, base_config) -> None:
 
     out = engine.run(context)
 
-    assert flaky.calls == base_config.max_retries + 1
+    assert flaky.calls == 2
     assert out["ok"] is True
     state = context.state_store.get_step("step-flaky")
     assert state is not None
     assert state.status == "completed"
-    assert state.attempts == base_config.max_retries + 1
+    assert state.attempts == 2
     assert any(e.get("event") == "step_failed" for e in trace.events)
     assert any(e.get("event") == "step_succeeded" for e in trace.events)
+
+
+def test_retry_strategy_runs_distinct_phases(make_context) -> None:
+    context, trace = make_context()
+    context.config.retry_strategy = RetryStrategyConfig(
+        short_retries=1,
+        prompt_revision_retries=1,
+        fallback_enabled=True,
+    )
+    step = StrategyAwareStep()
+
+    output = StepExecutionEngine([step]).run(context)
+
+    assert output["fallback"] is True
+    assert step.phases == ["initial", "short_retry", "prompt_revision", "fallback"]
+    assert step.failure_reasons == ["short_retry-failed", "prompt-revision-failed"]
+    scheduled_phases = [
+        event["retry_phase"]
+        for event in trace.events
+        if event.get("event") == "step_retry_scheduled"
+    ]
+    assert scheduled_phases == ["short_retry", "prompt_revision", "fallback"]
+    state = context.state_store.get_step(step.name)
+    assert state is not None
+    assert state.retry_phase == "fallback"
 
 
 def test_p1_force_true_reexecutes_completed_step(make_context) -> None:
@@ -170,7 +248,8 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     conf = load_config(str(cfg_path))
 
     assert conf.model_name == "overridden"
-    assert conf.max_retries == 2
+    assert conf.retry_strategy == RetryStrategyConfig()
+    assert conf.temperature_policy == TemperaturePolicyConfig()
     assert conf.image_generation.provider == "stub"
     assert conf.image_generation.model == ImageGenerationConfig().model
 
@@ -190,3 +269,183 @@ def test_p1_cli_like_integration_creates_core_outputs(make_context) -> None:
     assert context.state_store.state_path.exists()
     trace_path = context.state_store.state_path.parent / context.config.trace_file_name
     assert trace_path.exists()
+
+
+def test_schema_invalid_output_is_rejected_and_retried(make_context, base_config) -> None:
+    """Invalid generated output must enter the existing regeneration loop."""
+    context, trace = make_context()
+    step = ConstantOutputStep(
+        "step-01-generate-character-profiles",
+        {"character_profiles": [{"character_id": "c001"}]},
+    )
+    step.schema_name = "step-01-generate-character-profiles.schema.json"
+    step.input_keys = ("character_overviews",)
+    engine = StepExecutionEngine([step])
+
+    with pytest.raises(RuntimeError, match="Step failed"):
+        engine.run(context)
+
+    expected_attempts = (
+        1
+        + base_config.retry_strategy.short_retries
+        + base_config.retry_strategy.prompt_revision_retries
+        + int(base_config.retry_strategy.fallback_enabled)
+    )
+    assert step.calls == expected_attempts
+    assert not Path(context.artifacts_dir, f"{step.name}.json").exists()
+    failures = [event for event in trace.events if event.get("event") == "step_failed"]
+    assert len(failures) == expected_attempts
+    assert all("Schema validation failed" in str(event["failure_reason"]) for event in failures)
+
+
+def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
+    context, _ = make_context()
+
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+
+    assert "character_profiles" in output
+    assert "scenario_outline" in output
+    assert "scenario_sections" in output
+
+
+def test_character_contradiction_enters_retry_strategy(make_context, base_config) -> None:
+    context, trace = make_context()
+    step = ContradictingProfileStep()
+
+    with pytest.raises(RuntimeError, match="Step failed"):
+        StepExecutionEngine([step]).run(context)
+
+    expected_attempts = (
+        1
+        + base_config.retry_strategy.short_retries
+        + base_config.retry_strategy.prompt_revision_retries
+        + int(base_config.retry_strategy.fallback_enabled)
+    )
+    assert step.calls == expected_attempts
+    failures = [event for event in trace.events if event.get("event") == "step_failed"]
+    assert all("inconsistent name" in str(event["failure_reason"]) for event in failures)
+
+
+def test_consistency_checker_rejects_timeline_drift(make_context) -> None:
+    context, _ = make_context()
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+    drifted_sections = deepcopy(output["scenario_sections"])
+    drifted_sections[0]["section_title"] = "different-title"
+
+    with pytest.raises(ConsistencyCheckError, match="section timeline differs"):
+        PipelineConsistencyChecker().check(
+            output,
+            {"scenario_sections": drifted_sections},
+        )
+
+
+def test_consistency_checker_rejects_ambiguous_character_names(make_context) -> None:
+    context, _ = make_context()
+    context.shared_data["input"]["character_overviews"].append(
+        {
+            "character_id": "c002",
+            "name": "Ｎ",
+            "role": "other",
+            "summary": "s",
+        }
+    )
+    profiles = GenerateCharacterProfilesStep().run(context).output["character_profiles"]
+
+    with pytest.raises(ConsistencyCheckError, match="ambiguous character naming"):
+        PipelineConsistencyChecker().check(
+            context.shared_data,
+            {"character_profiles": profiles},
+        )
+
+
+def test_temperature_policy_limits_diversity_to_selected_steps(make_context) -> None:
+    context, trace = make_context()
+
+    StepExecutionEngine(build_minimal_steps()).run(context)
+
+    succeeded = {
+        event["step"]: event
+        for event in trace.events
+        if event.get("event") == "step_succeeded"
+    }
+    assert succeeded["step-01-generate-character-profiles"]["temperature"] == 0.2
+    assert succeeded["step-01-generate-character-profiles"]["temperature_mode"] == "deterministic"
+    assert succeeded["step-02-generate-outline"]["temperature"] == 0.7
+    assert succeeded["step-02-generate-outline"]["temperature_mode"] == "diversity"
+    assert succeeded["step-03-generate-sections"]["temperature"] == 0.7
+    assert succeeded["step-03-generate-sections"]["temperature_mode"] == "diversity"
+
+
+def test_temperature_policy_rejects_step_override(make_context) -> None:
+    context, trace = make_context()
+
+    with pytest.raises(RuntimeError, match="Step failed"):
+        StepExecutionEngine([TemperatureBypassStep()]).run(context)
+
+    failures = [event for event in trace.events if event.get("event") == "step_failed"]
+    assert failures
+    assert all("Temperature policy violation" in event["failure_reason"] for event in failures)
+
+
+def test_prompt_catalog_supports_pinned_versions_and_hashes() -> None:
+    catalog = PromptCatalog()
+
+    v1 = catalog.resolve("step-02-generate-outline", "v1")
+    v2 = catalog.resolve("step-02-generate-outline", "v2")
+
+    assert v1.version == "v1"
+    assert v2.version == "v2"
+    assert v1.text != v2.text
+    assert v1.content_hash != v2.content_hash
+
+
+def test_pipeline_trace_records_prompt_version_and_hash(make_context) -> None:
+    context, trace = make_context()
+    context.config.prompt_versions = {
+        "step-01-generate-character-profiles": "v1",
+        "step-02-generate-outline": "v1",
+        "step-03-generate-sections": "v1",
+    }
+
+    StepExecutionEngine(build_minimal_steps()).run(context)
+
+    succeeded = [event for event in trace.events if event.get("event") == "step_succeeded"]
+    assert len(succeeded) == 3
+    assert all(event["prompt_version"] == "v1" for event in succeeded)
+    assert all(len(event["prompt_hash"]) == 64 for event in succeeded)
+
+
+def test_prompt_impact_report_compares_run_metrics(tmp_path: Path) -> None:
+    baseline = tmp_path / "run-baseline"
+    candidate = tmp_path / "run-candidate"
+    for run_root, version, prompt_hash, duration, artifact in (
+        (baseline, "v1", "hash-v1", 100, '{"value": 1}'),
+        (candidate, "v2", "hash-v2", 130, '{"value": 2}'),
+    ):
+        (run_root / "artifacts").mkdir(parents=True)
+        events = [
+            {"step": "step-a", "event": "step_started"},
+            {
+                "step": "step-a",
+                "event": "step_succeeded",
+                "prompt_version": version,
+                "prompt_hash": prompt_hash,
+                "duration_ms": duration,
+                "input_tokens": 10,
+                "output_tokens": 20,
+            },
+        ]
+        (run_root / "trace.jsonl").write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+            encoding="utf-8",
+        )
+        (run_root / "artifacts" / "step-a.json").write_text(artifact, encoding="utf-8")
+
+    report = PromptImpactReporter().compare(baseline, candidate)
+    step = report["steps"]["step-a"]
+
+    assert step["prompt_changed"] is True
+    assert step["baseline_prompt_version"] == "v1"
+    assert step["candidate_prompt_version"] == "v2"
+    assert step["duration_ms_delta"] == 30
+    assert step["artifact_changed"] is True

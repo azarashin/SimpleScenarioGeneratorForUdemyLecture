@@ -26,8 +26,6 @@ class MemoryTraceLogger:
 def base_config(tmp_path: Path) -> AppConfig:
     return AppConfig(
         model_name="test-model",
-        temperature=0.4,
-        max_retries=1,
         output_root=str(tmp_path),
         artifacts_dir_name="artifacts",
         state_file_name="run-state.json",

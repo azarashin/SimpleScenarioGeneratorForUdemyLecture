@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from .prompts import resolve_step_prompt
 from .types import Step, StepContext, StepResult
 
 
 class GenerateCharacterProfilesStep(Step):
     name = "step-01-generate-character-profiles"
+    schema_name = "step-01-generate-character-profiles.schema.json"
+    input_keys = ("character_overviews",)
 
     def run(self, context: StepContext) -> StepResult:
+        prompt = resolve_step_prompt(context, self.name)
         input_data = context.shared_data["input"]
         profiles: list[dict[str, Any]] = []
         for item in input_data["character_overviews"]:
@@ -17,6 +21,21 @@ class GenerateCharacterProfilesStep(Step):
                     "character_id": item["character_id"],
                     "name": item["name"],
                     "role": item["role"],
+                    "personality": {
+                        "core_traits": ["thoughtful"],
+                        "values": ["integrity"],
+                        "weaknesses": ["hesitation"],
+                    },
+                    "speech": {
+                        "style": item.get("speech_style_hint", "natural"),
+                        "first_person": "I",
+                        "verbal_tics": [],
+                    },
+                    "appearance": {
+                        "age_impression": item.get("age_range", "adult"),
+                        "features": [item.get("appearance_hint", "distinctive")],
+                        "costume": "scene-appropriate clothing",
+                    },
                     "emotion_model": {
                         "available_expressions": ["neutral", "happy", "sad"],
                     },
@@ -25,9 +44,11 @@ class GenerateCharacterProfilesStep(Step):
 
         return StepResult(
             output={"character_profiles": profiles},
-            prompt="Generate character profiles",
+            prompt=prompt.text,
+            prompt_version=prompt.version,
+            prompt_hash=prompt.content_hash,
             model=context.config.model_name,
-            temperature=context.config.temperature,
+            temperature=context.config.temperature_for(self.name),
             input_tokens=120,
             output_tokens=240,
         )
@@ -35,8 +56,11 @@ class GenerateCharacterProfilesStep(Step):
 
 class GenerateOutlineStep(Step):
     name = "step-02-generate-outline"
+    schema_name = "step-02-generate-outline.schema.json"
+    input_keys = ("scenario_idea", "character_profiles")
 
     def run(self, context: StepContext) -> StepResult:
+        prompt = resolve_step_prompt(context, self.name)
         input_data = context.shared_data["input"]
         profile_ids = [x["character_id"] for x in context.shared_data["character_profiles"]]
         target = input_data["scenario_idea"]["target_length"]
@@ -71,9 +95,11 @@ class GenerateOutlineStep(Step):
 
         return StepResult(
             output={"scenario_outline": outline},
-            prompt="Generate scenario outline",
+            prompt=prompt.text,
+            prompt_version=prompt.version,
+            prompt_hash=prompt.content_hash,
             model=context.config.model_name,
-            temperature=context.config.temperature,
+            temperature=context.config.temperature_for(self.name),
             input_tokens=180,
             output_tokens=360,
         )
@@ -81,8 +107,11 @@ class GenerateOutlineStep(Step):
 
 class GenerateSectionsStep(Step):
     name = "step-03-generate-sections"
+    schema_name = "step-04-generate-sections.schema.json"
+    input_keys = ("character_profiles", "scenario_outline")
 
     def run(self, context: StepContext) -> StepResult:
+        prompt = resolve_step_prompt(context, self.name)
         outline = context.shared_data["scenario_outline"]
         sections_out: list[dict[str, Any]] = []
 
@@ -113,9 +142,11 @@ class GenerateSectionsStep(Step):
 
         return StepResult(
             output={"scenario_sections": sections_out},
-            prompt="Generate scenario sections",
+            prompt=prompt.text,
+            prompt_version=prompt.version,
+            prompt_hash=prompt.content_hash,
             model=context.config.model_name,
-            temperature=context.config.temperature,
+            temperature=context.config.temperature_for(self.name),
             input_tokens=220,
             output_tokens=440,
         )

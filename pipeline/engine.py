@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .consistency import PipelineConsistencyChecker
 from .state import RunStateStore, StepState
-from .types import Step, StepContext
+from .schema_validation import StepSchemaValidator
+from .types import Step, StepContext, StepResult
 
 
 @dataclass(slots=True)
@@ -16,13 +18,30 @@ class ExecutionOptions:
     force: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class AttemptPlan:
+    phase: str
+    phase_attempt: int
+
+
+class DeterminismPolicyError(ValueError):
+    """Raised when a step attempts to bypass the configured temperature policy."""
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 class StepExecutionEngine:
-    def __init__(self, steps: list[Step]) -> None:
+    def __init__(
+        self,
+        steps: list[Step],
+        schema_validator: StepSchemaValidator | None = None,
+        consistency_checker: PipelineConsistencyChecker | None = None,
+    ) -> None:
         self.steps = steps
+        self.schema_validator = schema_validator or StepSchemaValidator()
+        self.consistency_checker = consistency_checker or PipelineConsistencyChecker()
 
     def run(self, context: StepContext, options: ExecutionOptions | None = None) -> dict[str, object]:
         opts = options or ExecutionOptions()
@@ -92,17 +111,17 @@ class StepExecutionEngine:
         return context.shared_data
 
     def _run_single_step(self, step: Step, context: StepContext) -> bool:
-        max_attempts = max(1, context.config.max_retries + 1)
-        attempts = 0
+        plans = self._build_attempt_plans(context)
+        last_failure_reason = ""
 
-        while attempts < max_attempts:
-            attempts += 1
+        for attempts, plan in enumerate(plans, start=1):
             context.state_store.upsert_step(
                 StepState(
                     name=step.name,
                     status="running",
                     started_at=_now_iso(),
                     attempts=attempts,
+                    retry_phase=plan.phase,
                 )
             )
 
@@ -113,11 +132,53 @@ class StepExecutionEngine:
                     "step": step.name,
                     "event": "step_started",
                     "attempt": attempts,
+                    "retry_phase": plan.phase,
+                    "phase_attempt": plan.phase_attempt,
+                    "prompt_version": context.config.prompt_versions.get(step.name),
                 }
             )
 
             try:
-                result = step.run(context)
+                if step.schema_name:
+                    step_input = {
+                        key: self._get_input_value(context, key) for key in step.input_keys
+                    }
+                    self.schema_validator.validate(
+                        schema_name=step.schema_name,
+                        section="input",
+                        instance=step_input,
+                    )
+                result = self._execute_attempt(
+                    step=step,
+                    context=context,
+                    plan=plan,
+                    failure_reason=last_failure_reason,
+                )
+                effective_temperature = context.config.temperature_for(step.name)
+                if (
+                    result.temperature is not None
+                    and result.temperature != effective_temperature
+                ):
+                    raise DeterminismPolicyError(
+                        f"Temperature policy violation for {step.name}: "
+                        f"expected {effective_temperature}, got {result.temperature}"
+                    )
+                if step.schema_name:
+                    self.schema_validator.validate(
+                        schema_name=step.schema_name,
+                        section="output",
+                        instance=result.output,
+                    )
+                self.consistency_checker.check(context.shared_data, result.output)
+                context.trace_logger.log(
+                    {
+                        "run_id": context.run_id,
+                        "step": step.name,
+                        "event": "consistency_checked",
+                        "attempt": attempts,
+                        "retry_phase": plan.phase,
+                    }
+                )
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
 
                 artifact_path = Path(context.artifacts_dir) / f"{step.name}.json"
@@ -135,6 +196,7 @@ class StepExecutionEngine:
                         started_at=_now_iso(),
                         finished_at=_now_iso(),
                         attempts=attempts,
+                        retry_phase=plan.phase,
                         artifact_path=str(artifact_path),
                     )
                 )
@@ -144,12 +206,19 @@ class StepExecutionEngine:
                         "step": step.name,
                         "event": "step_succeeded",
                         "attempt": attempts,
+                        "retry_phase": plan.phase,
+                        "phase_attempt": plan.phase_attempt,
                         "duration_ms": elapsed_ms,
                         "prompt": result.prompt,
+                        "prompt_version": result.prompt_version,
+                        "prompt_hash": result.prompt_hash,
                         "model": result.model or context.config.model_name,
-                        "temperature": result.temperature
-                        if result.temperature is not None
-                        else context.config.temperature,
+                        "temperature": effective_temperature,
+                        "temperature_mode": (
+                            "diversity"
+                            if step.name in context.config.temperature_policy.diversity_steps
+                            else "deterministic"
+                        ),
                         "input_tokens": result.input_tokens,
                         "output_tokens": result.output_tokens,
                     }
@@ -158,6 +227,7 @@ class StepExecutionEngine:
             except Exception as exc:  # noqa: BLE001
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
                 reason = str(exc)
+                last_failure_reason = reason
                 context.state_store.upsert_step(
                     StepState(
                         name=step.name,
@@ -165,6 +235,7 @@ class StepExecutionEngine:
                         started_at=_now_iso(),
                         finished_at=_now_iso(),
                         attempts=attempts,
+                        retry_phase=plan.phase,
                         error_reason=reason,
                     )
                 )
@@ -174,9 +245,65 @@ class StepExecutionEngine:
                         "step": step.name,
                         "event": "step_failed",
                         "attempt": attempts,
+                        "retry_phase": plan.phase,
+                        "phase_attempt": plan.phase_attempt,
                         "duration_ms": elapsed_ms,
                         "failure_reason": reason,
                     }
                 )
 
+                next_index = attempts
+                if next_index < len(plans):
+                    next_plan = plans[next_index]
+                    context.trace_logger.log(
+                        {
+                            "run_id": context.run_id,
+                            "step": step.name,
+                            "event": "step_retry_scheduled",
+                            "attempt": attempts + 1,
+                            "retry_phase": next_plan.phase,
+                            "phase_attempt": next_plan.phase_attempt,
+                            "previous_failure_reason": reason,
+                        }
+                    )
+
         return False
+
+    @staticmethod
+    def _build_attempt_plans(context: StepContext) -> list[AttemptPlan]:
+        strategy = context.config.retry_strategy
+        plans = [AttemptPlan("initial", 1)]
+        plans.extend(
+            AttemptPlan("short_retry", index)
+            for index in range(1, strategy.short_retries + 1)
+        )
+        plans.extend(
+            AttemptPlan("prompt_revision", index)
+            for index in range(1, strategy.prompt_revision_retries + 1)
+        )
+        if strategy.fallback_enabled:
+            plans.append(AttemptPlan("fallback", 1))
+        return plans
+
+    @staticmethod
+    def _execute_attempt(
+        *,
+        step: Step,
+        context: StepContext,
+        plan: AttemptPlan,
+        failure_reason: str,
+    ) -> StepResult:
+        if plan.phase == "prompt_revision":
+            return step.run_with_prompt_revision(context, failure_reason)
+        if plan.phase == "fallback":
+            return step.run_fallback(context, failure_reason)
+        return step.run(context)
+
+    @staticmethod
+    def _get_input_value(context: StepContext, key: str) -> object:
+        if key in context.shared_data:
+            return context.shared_data[key]
+        pipeline_input = context.shared_data.get("input")
+        if isinstance(pipeline_input, dict) and key in pipeline_input:
+            return pipeline_input[key]
+        raise KeyError(f"Missing schema input: {key}")

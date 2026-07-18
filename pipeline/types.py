@@ -8,6 +8,8 @@ from typing import Any
 class StepResult:
     output: dict[str, Any]
     prompt: str | None = None
+    prompt_version: str | None = None
+    prompt_hash: str | None = None
     model: str | None = None
     temperature: float | None = None
     input_tokens: int | None = None
@@ -27,9 +29,21 @@ class StepContext:
 
 class Step:
     name: str
+    schema_name: str | None = None
+    input_keys: tuple[str, ...] = ()
 
     def run(self, context: StepContext) -> StepResult:
         raise NotImplementedError
+
+    def run_with_prompt_revision(
+        self, context: StepContext, failure_reason: str
+    ) -> StepResult:
+        """Retry with a corrected prompt. Override in model-backed steps."""
+        return self.run(context)
+
+    def run_fallback(self, context: StepContext, failure_reason: str) -> StepResult:
+        """Produce the final fallback result. Override for deterministic fallback behavior."""
+        return self.run(context)
 
 
 from .config import AppConfig  # noqa: E402
