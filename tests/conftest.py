@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.config import AppConfig, ImageGenerationConfig
+from pipeline.config import AppConfig, ImageGenerationConfig, TextGenerationConfig
 from pipeline.state import RunStateStore
 from pipeline.trace import TraceLogger
+from pipeline.text_generation import create_text_generation_provider
 from pipeline.types import StepContext
 
 
@@ -25,12 +26,12 @@ class MemoryTraceLogger:
 @pytest.fixture
 def base_config(tmp_path: Path) -> AppConfig:
     return AppConfig(
-        model_name="test-model",
         output_root=str(tmp_path),
         artifacts_dir_name="artifacts",
         state_file_name="run-state.json",
         trace_file_name="trace.jsonl",
         image_generation=ImageGenerationConfig(),
+        text_generation=TextGenerationConfig(model="test-model"),
     )
 
 
@@ -75,6 +76,7 @@ def make_context(tmp_path: Path, base_config: AppConfig, input_payload: dict[str
             state_store=RunStateStore(state_file),
             trace_logger=trace,
             shared_data=shared_data,
+            text_generation_provider=create_text_generation_provider("mock"),
         )
         return context, trace
 

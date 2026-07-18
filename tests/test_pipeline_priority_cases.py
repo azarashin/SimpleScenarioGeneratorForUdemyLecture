@@ -238,7 +238,11 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     cfg_path.write_text(
         json.dumps(
             {
-                "model_name": "overridden",
+                "text_generation": {
+                    "model": "overridden",
+                    "timeout_seconds": 30,
+                    "api_key_env": "TEST_TEXT_API_KEY",
+                },
                 "image_generation": {"provider": "stub"},
             }
         ),
@@ -248,6 +252,9 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     conf = load_config(str(cfg_path))
 
     assert conf.model_name == "overridden"
+    assert conf.text_generation.provider == "mock"
+    assert conf.text_generation.timeout_seconds == 30
+    assert conf.text_generation.api_key_env == "TEST_TEXT_API_KEY"
     assert conf.retry_strategy == RetryStrategyConfig()
     assert conf.temperature_policy == TemperaturePolicyConfig()
     assert conf.image_generation.provider == "stub"
@@ -306,6 +313,73 @@ def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
     assert "character_profiles" in output
     assert "scenario_outline" in output
     assert "scenario_sections" in output
+
+    outline_sections = [
+        section
+        for chapter in output["scenario_outline"]["chapters"]
+        for section in chapter["sections"]
+    ]
+    assert len({section["section_purpose"] for section in outline_sections}) == len(
+        outline_sections
+    )
+    assert len({tuple(section["key_events"]) for section in outline_sections}) == len(
+        outline_sections
+    )
+
+
+def test_scenario_body_quality_checks_length_and_required_events(make_context) -> None:
+    context, _ = make_context()
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+    first_section = output["scenario_sections"][0]
+    combined = "".join(block["text"] for block in first_section["narrative_blocks"])
+    character_count = sum(not character.isspace() for character in combined)
+
+    assert 800 <= character_count <= 1600
+    required_events = output["scenario_outline"]["chapters"][0]["sections"][0]["key_events"]
+    assert all(event in combined for event in required_events)
+
+    invalid_output = deepcopy(output)
+    invalid_output["scenario_sections"][0]["narrative_blocks"][0]["text"] = "too short"
+    invalid_output["scenario_sections"][0]["narrative_blocks"][1]["text"] = "short"
+    consistency_data = {
+        **output,
+        "_scenario_body_generation_config": {
+            "min_characters": 800,
+            "max_characters": 1600,
+            "require_event_mentions": True,
+        },
+    }
+    with pytest.raises(ConsistencyCheckError, match="body length"):
+        PipelineConsistencyChecker().check(
+            consistency_data,
+            {"scenario_sections": invalid_output["scenario_sections"]},
+        )
+
+    missing_event_output = deepcopy(output)
+    missing_event = required_events[0]
+    for block in missing_event_output["scenario_sections"][0]["narrative_blocks"]:
+        block["text"] = block["text"].replace(missing_event, "covered event")
+    with pytest.raises(ConsistencyCheckError, match="does not cover required events"):
+        PipelineConsistencyChecker().check(
+            consistency_data,
+            {"scenario_sections": missing_event_output["scenario_sections"]},
+        )
+
+
+def test_mock_section_generation_carries_previous_section_state(make_context) -> None:
+    context, _ = make_context()
+    context.shared_data["input"]["scenario_idea"]["target_length"] = {
+        "chapter_count": 1,
+        "sections_per_chapter": 2,
+    }
+
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+
+    first_event = output["scenario_outline"]["chapters"][0]["sections"][0]["key_events"][0]
+    second_text = "".join(
+        block["text"] for block in output["scenario_sections"][1]["narrative_blocks"]
+    )
+    assert first_event in second_text
 
 
 def test_character_contradiction_enters_retry_strategy(make_context, base_config) -> None:
@@ -404,14 +478,19 @@ def test_pipeline_trace_records_prompt_version_and_hash(make_context) -> None:
     context.config.prompt_versions = {
         "step-01-generate-character-profiles": "v1",
         "step-02-generate-outline": "v1",
-        "step-03-generate-sections": "v1",
+        "step-03-generate-sections": "v2",
     }
 
     StepExecutionEngine(build_minimal_steps()).run(context)
 
     succeeded = [event for event in trace.events if event.get("event") == "step_succeeded"]
     assert len(succeeded) == 3
-    assert all(event["prompt_version"] == "v1" for event in succeeded)
+    versions = {event["step"]: event["prompt_version"] for event in succeeded}
+    assert versions == {
+        "step-01-generate-character-profiles": "v1",
+        "step-02-generate-outline": "v1",
+        "step-03-generate-sections": "v2",
+    }
     assert all(len(event["prompt_hash"]) == 64 for event in succeeded)
 
 

@@ -113,8 +113,12 @@ class StepExecutionEngine:
     def _run_single_step(self, step: Step, context: StepContext) -> bool:
         plans = self._build_attempt_plans(context)
         last_failure_reason = ""
+        plan_index = 0
+        attempts = 0
 
-        for attempts, plan in enumerate(plans, start=1):
+        while plan_index < len(plans):
+            plan = plans[plan_index]
+            attempts += 1
             context.state_store.upsert_step(
                 StepState(
                     name=step.name,
@@ -169,7 +173,21 @@ class StepExecutionEngine:
                         section="output",
                         instance=result.output,
                     )
-                self.consistency_checker.check(context.shared_data, result.output)
+                consistency_data = {
+                    **context.shared_data,
+                    "_scenario_body_generation_config": {
+                        "min_characters": (
+                            context.config.scenario_body_generation.min_characters
+                        ),
+                        "max_characters": (
+                            context.config.scenario_body_generation.max_characters
+                        ),
+                        "require_event_mentions": (
+                            context.config.scenario_body_generation.require_event_mentions
+                        ),
+                    },
+                }
+                self.consistency_checker.check(consistency_data, result.output)
                 context.trace_logger.log(
                     {
                         "run_id": context.run_id,
@@ -183,10 +201,12 @@ class StepExecutionEngine:
 
                 artifact_path = Path(context.artifacts_dir) / f"{step.name}.json"
                 artifact_path.parent.mkdir(parents=True, exist_ok=True)
-                artifact_path.write_text(
+                temp_artifact_path = artifact_path.with_suffix(".tmp")
+                temp_artifact_path.write_text(
                     json.dumps(result.output, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
+                temp_artifact_path.replace(artifact_path)
 
                 context.shared_data.update(result.output)
                 context.state_store.upsert_step(
@@ -252,8 +272,12 @@ class StepExecutionEngine:
                     }
                 )
 
-                next_index = attempts
-                if next_index < len(plans):
+                next_index = self._next_plan_index(
+                    plans=plans,
+                    current_index=plan_index,
+                    preferred_phase=step.retry_phase_for_error(exc),
+                )
+                if next_index is not None:
                     next_plan = plans[next_index]
                     context.trace_logger.log(
                         {
@@ -266,8 +290,31 @@ class StepExecutionEngine:
                             "previous_failure_reason": reason,
                         }
                     )
+                    plan_index = next_index
+                    continue
+                break
 
         return False
+
+    @staticmethod
+    def _next_plan_index(
+        *,
+        plans: list[AttemptPlan],
+        current_index: int,
+        preferred_phase: str | None,
+    ) -> int | None:
+        remaining = range(current_index + 1, len(plans))
+        if preferred_phase is None:
+            next_index = current_index + 1
+            return next_index if next_index < len(plans) else None
+
+        for index in remaining:
+            if plans[index].phase == preferred_phase:
+                return index
+        for index in range(current_index + 1, len(plans)):
+            if plans[index].phase == "fallback":
+                return index
+        return None
 
     @staticmethod
     def _build_attempt_plans(context: StepContext) -> list[AttemptPlan]:

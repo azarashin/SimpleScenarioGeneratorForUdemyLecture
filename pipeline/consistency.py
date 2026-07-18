@@ -4,12 +4,14 @@ import re
 import unicodedata
 from typing import Any
 
-
-class ConsistencyCheckError(ValueError):
-    """Raised when generated data contradicts previously established data."""
+from .errors import ConsistencyCheckError
+from .scenario_quality import ScenarioBodyQualityChecker
 
 
 class PipelineConsistencyChecker:
+    def __init__(self) -> None:
+        self.scenario_quality_checker = ScenarioBodyQualityChecker()
+
     def check(self, shared_data: dict[str, Any], output: dict[str, Any]) -> None:
         candidate = {**shared_data, **output}
         if "character_profiles" in output:
@@ -119,6 +121,16 @@ class PipelineConsistencyChecker:
                     self._fail(
                         f"speaker {speaker_id!r} is not a participant at {location}"
                     )
+            body_config = data.get("_scenario_body_generation_config")
+            if body_config:
+                self.scenario_quality_checker.check_section(
+                    generated_section=section,
+                    outline_section=outline_section,
+                    valid_character_ids=valid_characters,
+                    min_characters=body_config["min_characters"],
+                    max_characters=body_config["max_characters"],
+                    require_event_mentions=body_config["require_event_mentions"],
+                )
 
     @staticmethod
     def _pipeline_input(data: dict[str, Any]) -> dict[str, Any]:
