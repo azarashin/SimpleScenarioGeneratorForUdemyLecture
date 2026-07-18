@@ -977,10 +977,71 @@ class GenerateSectionsStep(Step):
             )
 
 
+class GenerateDialogueTagsStep(Step):
+    name = "step-05-generate-dialogue-tags"
+    schema_name = "step-05-generate-dialogue-tags.schema.json"
+    input_keys = ("character_profiles", "scenario_sections")
+
+    def run(self, context: StepContext) -> StepResult:
+        profiles = {
+            profile["character_id"]: profile
+            for profile in context.shared_data["character_profiles"]
+        }
+        tags: list[dict[str, Any]] = []
+        for section in context.shared_data["scenario_sections"]:
+            for block in section["narrative_blocks"]:
+                if block["type"] != "dialogue":
+                    continue
+                speaker_id = block["speaker_id"]
+                profile = profiles[speaker_id]
+                expression, reason = self._infer_expression(
+                    str(block["text"]),
+                    profile["emotion_model"]["available_expressions"],
+                )
+                tags.append(
+                    {
+                        "chapter_no": section["chapter_no"],
+                        "section_no": section["section_no"],
+                        "block_id": block["block_id"],
+                        "speaker_id": speaker_id,
+                        "expression": expression,
+                        "emotion_reason": reason,
+                    }
+                )
+
+        return StepResult(
+            output={"dialogue_expression_tags": tags},
+            model="deterministic-rule-based",
+            temperature=context.config.temperature_for(self.name),
+            metadata={"dialogue_tag_count": len(tags)},
+        )
+
+    @staticmethod
+    def _infer_expression(text: str, available: list[str]) -> tuple[str, str]:
+        normalized = text.casefold()
+        rules = (
+            ("angry", ("怒", "許さ", "ふざけ", "damn", "angry"), "怒りを示す語句"),
+            ("sad", ("悲", "つら", "泣", "ごめん", "sad"), "悲しみを示す語句"),
+            ("worried", ("心配", "不安", "大丈夫", "worry"), "心配を示す語句"),
+            ("confused", ("どういう", "わから", "なぜ", "どうして", "?", "？"), "疑問を示す語句"),
+            ("surprised", ("まさか", "本当", "えっ", "!", "！"), "驚きを示す語句"),
+            ("smile", ("ありがとう", "うれし", "よかった", "笑", "glad"), "肯定的な語句"),
+            ("determined", ("必ず", "絶対", "やる", "進もう"), "決意を示す語句"),
+        )
+        available_set = set(available)
+        for expression, markers, reason in rules:
+            if expression in available_set and any(marker in normalized for marker in markers):
+                return expression, reason
+        if "neutral" in available_set:
+            return "neutral", "明確な感情表現がないため中立"
+        return available[0], "利用可能な表情から既定値を選択"
+
+
 def build_minimal_steps() -> list[Step]:
     return [
         GenerateCharacterProfilesStep(),
         GenerateOutlineStep(),
         GenerateCharacterImagesStep(),
         GenerateSectionsStep(),
+        GenerateDialogueTagsStep(),
     ]

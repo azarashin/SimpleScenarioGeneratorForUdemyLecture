@@ -473,6 +473,11 @@ def test_temperature_policy_limits_diversity_to_selected_steps(make_context) -> 
     )
     assert succeeded["step-04-generate-sections"]["temperature"] == 0.7
     assert succeeded["step-04-generate-sections"]["temperature_mode"] == "diversity"
+    assert succeeded["step-05-generate-dialogue-tags"]["temperature"] == 0.2
+    assert (
+        succeeded["step-05-generate-dialogue-tags"]["temperature_mode"]
+        == "deterministic"
+    )
 
 
 def test_temperature_policy_rejects_step_override(make_context) -> None:
@@ -507,18 +512,29 @@ def test_pipeline_trace_records_prompt_version_and_hash(make_context) -> None:
         "step-04-generate-sections": "v2",
     }
 
-    StepExecutionEngine(build_minimal_steps()).run(context)
+    steps = build_minimal_steps()
+    StepExecutionEngine(steps).run(context)
 
     succeeded = [event for event in trace.events if event.get("event") == "step_succeeded"]
-    assert len(succeeded) == 4
+    assert len(succeeded) == len(steps)
     versions = {event["step"]: event["prompt_version"] for event in succeeded}
     assert versions == {
         "step-01-generate-character-profiles": "v1",
         "step-02-generate-outline": "v1",
         "step-03-generate-character-images": "v1",
         "step-04-generate-sections": "v2",
+        "step-05-generate-dialogue-tags": None,
     }
-    assert all(len(event["prompt_hash"]) == 64 for event in succeeded)
+    prompt_backed = [
+        event for event in succeeded if event["step"] != "step-05-generate-dialogue-tags"
+    ]
+    assert all(len(event["prompt_hash"]) == 64 for event in prompt_backed)
+    dialogue_tags = next(
+        event
+        for event in succeeded
+        if event["step"] == "step-05-generate-dialogue-tags"
+    )
+    assert dialogue_tags["prompt_hash"] is None
 
 
 def test_prompt_impact_report_compares_run_metrics(tmp_path: Path) -> None:
