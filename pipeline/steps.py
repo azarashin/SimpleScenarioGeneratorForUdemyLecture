@@ -7,6 +7,8 @@ from .types import Step, StepContext, StepResult
 
 class GenerateCharacterProfilesStep(Step):
     name = "step-01-generate-character-profiles"
+    schema_name = "step-01-generate-character-profiles.schema.json"
+    input_keys = ("character_overviews",)
 
     def run(self, context: StepContext) -> StepResult:
         input_data = context.shared_data["input"]
@@ -17,6 +19,21 @@ class GenerateCharacterProfilesStep(Step):
                     "character_id": item["character_id"],
                     "name": item["name"],
                     "role": item["role"],
+                    "personality": {
+                        "core_traits": ["thoughtful"],
+                        "values": ["integrity"],
+                        "weaknesses": ["hesitation"],
+                    },
+                    "speech": {
+                        "style": item.get("speech_style_hint", "natural"),
+                        "first_person": "I",
+                        "verbal_tics": [],
+                    },
+                    "appearance": {
+                        "age_impression": item.get("age_range", "adult"),
+                        "features": [item.get("appearance_hint", "distinctive")],
+                        "costume": "scene-appropriate clothing",
+                    },
                     "emotion_model": {
                         "available_expressions": ["neutral", "happy", "sad"],
                     },
@@ -35,6 +52,8 @@ class GenerateCharacterProfilesStep(Step):
 
 class GenerateOutlineStep(Step):
     name = "step-02-generate-outline"
+    schema_name = "step-02-generate-outline.schema.json"
+    input_keys = ("scenario_idea", "character_profiles")
 
     def run(self, context: StepContext) -> StepResult:
         input_data = context.shared_data["input"]
@@ -81,6 +100,8 @@ class GenerateOutlineStep(Step):
 
 class GenerateSectionsStep(Step):
     name = "step-03-generate-sections"
+    schema_name = "step-04-generate-sections.schema.json"
+    input_keys = ("character_profiles", "scenario_outline")
 
     def run(self, context: StepContext) -> StepResult:
         outline = context.shared_data["scenario_outline"]

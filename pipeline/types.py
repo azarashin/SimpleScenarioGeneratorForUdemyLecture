@@ -27,6 +27,8 @@ class StepContext:
 
 class Step:
     name: str
+    schema_name: str | None = None
+    input_keys: tuple[str, ...] = ()
 
     def run(self, context: StepContext) -> StepResult:
         raise NotImplementedError

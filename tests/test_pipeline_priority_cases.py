@@ -7,6 +7,7 @@ import pytest
 
 from pipeline.config import ImageGenerationConfig, load_config
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
+from pipeline.steps import build_minimal_steps
 from pipeline.state import StepState
 from pipeline.types import Step, StepContext, StepResult
 
@@ -190,3 +191,34 @@ def test_p1_cli_like_integration_creates_core_outputs(make_context) -> None:
     assert context.state_store.state_path.exists()
     trace_path = context.state_store.state_path.parent / context.config.trace_file_name
     assert trace_path.exists()
+
+
+def test_schema_invalid_output_is_rejected_and_retried(make_context, base_config) -> None:
+    """Invalid generated output must enter the existing regeneration loop."""
+    context, trace = make_context()
+    step = ConstantOutputStep(
+        "step-01-generate-character-profiles",
+        {"character_profiles": [{"character_id": "c001"}]},
+    )
+    step.schema_name = "step-01-generate-character-profiles.schema.json"
+    step.input_keys = ("character_overviews",)
+    engine = StepExecutionEngine([step])
+
+    with pytest.raises(RuntimeError, match="Step failed"):
+        engine.run(context)
+
+    assert step.calls == base_config.max_retries + 1
+    assert not Path(context.artifacts_dir, f"{step.name}.json").exists()
+    failures = [event for event in trace.events if event.get("event") == "step_failed"]
+    assert len(failures) == base_config.max_retries + 1
+    assert all("Schema validation failed" in str(event["failure_reason"]) for event in failures)
+
+
+def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
+    context, _ = make_context()
+
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+
+    assert "character_profiles" in output
+    assert "scenario_outline" in output
+    assert "scenario_sections" in output

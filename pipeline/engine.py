@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .state import RunStateStore, StepState
+from .schema_validation import StepSchemaValidator
 from .types import Step, StepContext
 
 
@@ -21,8 +22,13 @@ def _now_iso() -> str:
 
 
 class StepExecutionEngine:
-    def __init__(self, steps: list[Step]) -> None:
+    def __init__(
+        self,
+        steps: list[Step],
+        schema_validator: StepSchemaValidator | None = None,
+    ) -> None:
         self.steps = steps
+        self.schema_validator = schema_validator or StepSchemaValidator()
 
     def run(self, context: StepContext, options: ExecutionOptions | None = None) -> dict[str, object]:
         opts = options or ExecutionOptions()
@@ -117,7 +123,22 @@ class StepExecutionEngine:
             )
 
             try:
+                if step.schema_name:
+                    step_input = {
+                        key: self._get_input_value(context, key) for key in step.input_keys
+                    }
+                    self.schema_validator.validate(
+                        schema_name=step.schema_name,
+                        section="input",
+                        instance=step_input,
+                    )
                 result = step.run(context)
+                if step.schema_name:
+                    self.schema_validator.validate(
+                        schema_name=step.schema_name,
+                        section="output",
+                        instance=result.output,
+                    )
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
 
                 artifact_path = Path(context.artifacts_dir) / f"{step.name}.json"
@@ -180,3 +201,12 @@ class StepExecutionEngine:
                 )
 
         return False
+
+    @staticmethod
+    def _get_input_value(context: StepContext, key: str) -> object:
+        if key in context.shared_data:
+            return context.shared_data[key]
+        pipeline_input = context.shared_data.get("input")
+        if isinstance(pipeline_input, dict) and key in pipeline_input:
+            return pipeline_input[key]
+        raise KeyError(f"Missing schema input: {key}")
