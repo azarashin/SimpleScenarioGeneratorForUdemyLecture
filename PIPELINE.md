@@ -13,6 +13,10 @@
 - `step-05-generate-dialogue-tags`: セリフ単位の話者・表情タグ生成
 - `step-06-render-html`: 目次・章・節HTMLと話者画像表示の生成
 
+Step 06を単独で実行する場合、メモリ上にないStep 01〜05の生成結果は
+`artifacts/step-NN-*.json` から自動的に読み込まれます。画像マニフェストのパスは
+runディレクトリを基準に解決され、HTML生成前に画像ファイルの存在が確認されます。
+
 シナリオ本文の生成契約は `SCENARIO_BODY_SPEC.md`、会話量を増やすための考え方と調整方法は
 `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。
 画像生成の設定、実行例、成果物、再開方法は `IMAGE_GENERATION.md` を参照してください。

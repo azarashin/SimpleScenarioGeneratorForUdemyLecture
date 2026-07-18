@@ -35,6 +35,9 @@ class Step:
     schema_name: str | None = None
     input_keys: tuple[str, ...] = ()
 
+    def prepare_context(self, context: StepContext) -> None:
+        """Restore or prepare inputs before schema validation when needed."""
+
     def run(self, context: StepContext) -> StepResult:
         raise NotImplementedError
 

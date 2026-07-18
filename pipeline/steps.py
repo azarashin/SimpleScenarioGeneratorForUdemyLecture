@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image
 
 from .asset_manager import CharacterAssetResolver
+from .artifact_loader import PipelineArtifactLoader
 from .character_image_prompt import CharacterImagePromptBuilder, EXPRESSION_CONCEPTS
 from .consistency import PipelineConsistencyChecker
 from .errors import ScenarioGenerationFallbackError
@@ -1048,6 +1049,22 @@ class RenderHtmlStep(Step):
         "dialogue_expression_tags",
         "character_image_assets",
     )
+
+    def prepare_context(self, context: StepContext) -> None:
+        loaded = PipelineArtifactLoader(Path(context.artifacts_dir)).load_missing(
+            context.shared_data,
+            required_keys=self.input_keys,
+            optional_keys=("character_profiles",),
+        )
+        if loaded:
+            context.trace_logger.log(
+                {
+                    "run_id": context.run_id,
+                    "step": self.name,
+                    "event": "artifacts_auto_loaded",
+                    "outputs": list(loaded),
+                }
+            )
 
     def run(self, context: StepContext) -> StepResult:
         outline = context.shared_data["scenario_outline"]

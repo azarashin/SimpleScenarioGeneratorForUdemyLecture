@@ -160,6 +160,7 @@ class StepExecutionEngine:
             )
 
             try:
+                step.prepare_context(context)
                 if step.schema_name:
                     step_input = {
                         key: self._get_input_value(context, key) for key in step.input_keys
