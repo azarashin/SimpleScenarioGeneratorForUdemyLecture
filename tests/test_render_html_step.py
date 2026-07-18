@@ -91,6 +91,8 @@ def test_render_html_step_writes_pages_and_manifest(make_context):
     )
     assert "葵" in section_html
     assert 'src="../assets/characters/c001/base.png"' in section_html
+    assert result.metadata["validated_link_count"] == 6
+    assert result.metadata["validated_image_count"] == 1
 
 
 def test_render_html_step_auto_loads_generated_json_and_image_assets(make_context):

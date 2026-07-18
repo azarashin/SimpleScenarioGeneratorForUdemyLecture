@@ -25,6 +25,7 @@ from .scenario_state import (
 from .section_prompt import ScenarioSectionPromptBuilder
 from .html_templates import render_chapter_page, render_index_page, render_section_page
 from .html_output import HtmlOutputWriter
+from .html_validation import HtmlOutputValidator
 from .types import Step, StepContext, StepResult
 
 
@@ -1145,6 +1146,14 @@ class RenderHtmlStep(Step):
                 }
             )
 
+        validation = HtmlOutputValidator(run_root).validate(
+            [
+                index_relative,
+                *(page["path"] for page in chapter_pages),
+                *(page["path"] for page in section_pages),
+            ]
+        )
+
         return StepResult(
             output={
                 "rendered_html_pages": {
@@ -1158,6 +1167,8 @@ class RenderHtmlStep(Step):
             temperature=context.config.temperature_for(self.name),
             metadata={
                 "html_page_count": 1 + len(chapter_pages) + len(section_pages),
+                "validated_link_count": validation.link_count,
+                "validated_image_count": validation.image_count,
                 "dialogue_rendering_count": len(rendering),
             },
         )
