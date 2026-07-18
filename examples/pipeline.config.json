@@ -36,7 +36,7 @@
   "trace_file_name": "trace.jsonl",
   "image_generation": {
     "provider": "mock",
-    "model": "image-mock-v1",
+    "model": "chat-gpt-image-2",
     "width": 1024,
     "height": 1024,
     "style_preset": "anime"

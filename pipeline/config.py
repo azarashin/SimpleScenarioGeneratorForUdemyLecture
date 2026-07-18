@@ -9,7 +9,7 @@ from typing import Any
 @dataclass(slots=True)
 class ImageGenerationConfig:
     provider: str = "mock"
-    model: str = "image-mock-v1"
+    model: str = "chat-gpt-image-2"
     width: int = 1024
     height: int = 1024
     style_preset: str = "anime"
