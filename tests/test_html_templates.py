@@ -4,6 +4,7 @@ from pipeline.html_templates import (
     build_chapter_navigation,
     build_section_navigation,
     render_chapter_page,
+    render_dialogue_row,
     render_index_page,
     render_section_page,
 )
@@ -93,6 +94,10 @@ def test_section_template_renders_blocks_images_and_navigation():
     assert "行こう。" in html
     assert "葵 - smile" in html
     assert '../assets/c001/smile.png' in html
+    assert html.count('class="dialogue-row"') == 1
+    assert 'data-block-id="b2"' in html
+    assert 'class="speaker">葵</span>' in html
+    assert 'class="dialogue-line">行こう。</p>' in html
     assert 'rel="previous"' in html
     assert 'rel="next"' in html
 
@@ -116,6 +121,56 @@ def test_section_template_falls_back_to_base_image():
 
     assert 'src="base.png"' in html
     assert 'alt="葵 - base"' in html
+
+
+def test_dialogue_row_uses_accessible_placeholder_when_no_image_exists():
+    html = render_dialogue_row(
+        block={
+            "block_id": "b&1",
+            "type": "dialogue",
+            "text": "<待って>",
+            "speaker_id": "c001",
+        },
+        expression="surprised",
+        character={"name": "葵"},
+    )
+
+    assert 'class="dialogue-row"' in html
+    assert 'data-block-id="b&amp;1"' in html
+    assert 'data-expression="surprised"' in html
+    assert 'class="portrait-placeholder"' in html
+    assert 'aria-label="葵 - image unavailable"' in html
+    assert '&lt;待って&gt;' in html
+
+
+def test_section_uses_expression_tag_for_the_current_section_only():
+    section = {
+        "chapter_no": 1,
+        "section_no": 1,
+        "section_title": "雨の駅",
+        "narrative_blocks": [
+            {"block_id": "b2", "type": "dialogue", "text": "行こう。", "speaker_id": "c001"}
+        ],
+    }
+    html = render_section_page(
+        work_title="物語",
+        chapter=_chapter(),
+        section=section,
+        dialogue_tags=[
+            {"chapter_no": 2, "section_no": 1, "block_id": "b2", "expression": "angry"},
+            {"chapter_no": 1, "section_no": 1, "block_id": "b2", "expression": "smile"},
+        ],
+        characters={
+            "c001": {
+                "name": "葵",
+                "base_image_path": "base.png",
+                "expression_images": {"smile": "smile.png", "angry": "angry.png"},
+            }
+        },
+    )
+
+    assert 'src="smile.png"' in html
+    assert 'src="angry.png"' not in html
 
 
 def _outline():

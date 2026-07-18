@@ -176,7 +176,14 @@ def render_section_page(
         chapter_href = navigation.chapter_href
         index_href = navigation.index_href
 
-    tag_by_block = {str(tag["block_id"]): tag for tag in dialogue_tags}
+    chapter_no = int(section["chapter_no"])
+    section_no = int(section["section_no"])
+    tag_by_block = {
+        str(tag["block_id"]): tag
+        for tag in dialogue_tags
+        if int(tag.get("chapter_no", chapter_no)) == chapter_no
+        and int(tag.get("section_no", section_no)) == section_no
+    }
     character_map = characters or {}
     blocks = []
     for block in section["narrative_blocks"]:
@@ -185,25 +192,13 @@ def render_section_page(
             blocks.append(f'<p class="narration">{text}</p>')
             continue
 
-        speaker_id = str(block["speaker_id"])
-        character = character_map.get(speaker_id, {})
-        speaker_name = str(character.get("name", speaker_id))
         tag = tag_by_block.get(str(block["block_id"]), {})
-        expression = str(tag.get("expression", "base"))
-        expression_images = character.get("expression_images", {})
-        image_path = expression_images.get(expression) or character.get("base_image_path")
-        image = ""
-        if image_path:
-            image = '<img src="{0}" alt="{1}">'.format(
-                escape(str(image_path), quote=True),
-                escape(
-                    f"{speaker_name} - {expression if expression_images.get(expression) else 'base'}",
-                    quote=True,
-                ),
-            )
         blocks.append(
-            '<section class="dialogue">{0}<div><span class="speaker">{1}</span>'
-            '<p>{2}</p></div></section>'.format(image, escape(speaker_name), text)
+            render_dialogue_row(
+                block=block,
+                expression=str(tag.get("expression", "base")),
+                character=character_map.get(str(block["speaker_id"]), {}),
+            )
         )
 
     return _template("section.html").substitute(
@@ -216,6 +211,45 @@ def render_section_page(
         next_link=_nav_link(next_href, "次の節", "next"),
         chapter_href=escape(chapter_href, quote=True),
         index_href=escape(index_href, quote=True),
+    )
+
+
+def render_dialogue_row(
+    *, block: dict[str, Any], expression: str, character: dict[str, Any]
+) -> str:
+    """Render one dialogue block as one speaker/image/text row."""
+    block_id = str(block["block_id"])
+    speaker_id = str(block["speaker_id"])
+    speaker_name = str(character.get("name", speaker_id))
+    expression_images = character.get("expression_images", {})
+    expression_path = expression_images.get(expression)
+    image_path = expression_path or character.get("base_image_path")
+    rendered_expression = expression if expression_path else "base"
+
+    if image_path:
+        portrait = '<img src="{0}" alt="{1}" loading="lazy">'.format(
+            escape(str(image_path), quote=True),
+            escape(f"{speaker_name} - {rendered_expression}", quote=True),
+        )
+    else:
+        initial = speaker_name[:1] or "?"
+        portrait = (
+            '<span class="portrait-placeholder" role="img" aria-label="{0}">{1}</span>'
+        ).format(
+            escape(f"{speaker_name} - image unavailable", quote=True),
+            escape(initial),
+        )
+
+    return (
+        '<div class="dialogue-row" data-block-id="{0}" data-expression="{1}">'
+        '{2}<div class="dialogue-content"><span class="speaker">{3}</span>'
+        '<p class="dialogue-line">{4}</p></div></div>'
+    ).format(
+        escape(block_id, quote=True),
+        escape(expression, quote=True),
+        portrait,
+        escape(speaker_name),
+        escape(str(block["text"])),
     )
 
 
