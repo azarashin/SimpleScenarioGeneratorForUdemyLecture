@@ -16,7 +16,7 @@ from pipeline.types import StepContext
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run minimal scenario pipeline")
+    parser = argparse.ArgumentParser(description="Run the scenario generation pipeline")
     parser.add_argument("--config", type=str, default="examples/pipeline.config.json")
     parser.add_argument("--input", type=str, default="examples/input.json")
     parser.add_argument("--run-id", type=str, default=None)

@@ -140,6 +140,11 @@
 - 受け入れ条件:
   - `base_image_path` のファイルが存在する。
   - `expression_images` は `available_expressions` を少なくともすべてカバーする。
+  - 画像パスは run ディレクトリを基準とする安全な相対パスである。
+  - 画像形式は PNG、JPEG、WebP のいずれかで、拡張子と画像内容が一致する。
+  - 画像の実寸は `image_generation.width` と `image_generation.height` に一致する。
+  - 基本画像と各表情画像は画像単位のチェックポイントを持ち、成功済み画像を再利用できる。
+  - OpenAIプロバイダーの表情差分生成では、基本画像を編集入力として使用する。
 
 ---
 
