@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .prompts import resolve_step_prompt
+from .section_prompt import ScenarioSectionPromptBuilder
 from .types import Step, StepContext, StepResult
 
 
@@ -111,15 +112,29 @@ class GenerateSectionsStep(Step):
     input_keys = ("character_profiles", "scenario_outline")
 
     def run(self, context: StepContext) -> StepResult:
-        prompt = resolve_step_prompt(context, self.name)
         outline = context.shared_data["scenario_outline"]
+        scenario_idea = context.shared_data["input"]["scenario_idea"]
+        character_profiles = context.shared_data["character_profiles"]
+        requested_version = context.config.prompt_versions.get(self.name)
+        prompt_builder = ScenarioSectionPromptBuilder()
+        rendered_prompts = []
+        previous_state: dict[str, Any] = {"status": "story_start"}
         sections_out: list[dict[str, Any]] = []
 
         for chapter in outline["chapters"]:
             for section in chapter["sections"]:
+                rendered_prompts.append(
+                    prompt_builder.build(
+                        scenario_idea=scenario_idea,
+                        character_profiles=character_profiles,
+                        chapter=chapter,
+                        section=section,
+                        previous_state=previous_state,
+                        version=requested_version,
+                    )
+                )
                 speaker_id = section["participating_characters"][0]
-                sections_out.append(
-                    {
+                generated_section = {
                         "chapter_no": chapter["chapter_no"],
                         "section_no": section["section_no"],
                         "section_title": section["section_title"],
@@ -138,17 +153,27 @@ class GenerateSectionsStep(Step):
                             },
                         ],
                     }
-                )
+                sections_out.append(generated_section)
+                previous_state = {
+                    "previous_chapter_no": chapter["chapter_no"],
+                    "previous_section_no": section["section_no"],
+                    "previous_section_summary": " ".join(
+                        block["text"] for block in generated_section["narrative_blocks"]
+                    ),
+                }
+
+        prompt = rendered_prompts[0]
 
         return StepResult(
             output={"scenario_sections": sections_out},
             prompt=prompt.text,
             prompt_version=prompt.version,
-            prompt_hash=prompt.content_hash,
+            prompt_hash=prompt.template_hash,
             model=context.config.model_name,
             temperature=context.config.temperature_for(self.name),
             input_tokens=220,
             output_tokens=440,
+            metadata={"section_prompt_count": len(rendered_prompts)},
         )
 
 

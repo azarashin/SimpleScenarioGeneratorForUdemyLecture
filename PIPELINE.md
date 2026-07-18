@@ -33,6 +33,10 @@ For a future network-backed provider, set the secret in the process environment:
 $env:TEXT_GENERATION_API_KEY = "your-api-key"
 ```
 
+Scenario-section prompt `v2` is rendered once per target section. It includes the
+scenario idea, character profiles, chapter and section outline, previous state,
+allowed character IDs, the output schema bundle, and narration/dialogue constraints.
+
 ## Run
 
 ```powershell
