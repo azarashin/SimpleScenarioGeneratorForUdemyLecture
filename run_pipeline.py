@@ -10,6 +10,7 @@ from pipeline.engine import ExecutionOptions, StepExecutionEngine
 from pipeline.state import RunStateStore
 from pipeline.steps import build_minimal_steps
 from pipeline.trace import TraceLogger
+from pipeline.text_generation import create_text_generation_provider
 from pipeline.types import StepContext
 
 
@@ -42,6 +43,7 @@ def main() -> None:
         state_store=RunStateStore(state_file),
         trace_logger=TraceLogger(trace_file),
         shared_data={"input": input_data},
+        text_generation_provider=create_text_generation_provider("mock"),
     )
 
     engine = StepExecutionEngine(build_minimal_steps())

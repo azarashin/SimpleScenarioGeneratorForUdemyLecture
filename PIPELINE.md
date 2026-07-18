@@ -10,6 +10,8 @@ Implemented minimal steps:
 - step-03-generate-sections
 
 The generation contract for scenario sections is defined in `SCENARIO_BODY_SPEC.md`.
+Text generation is accessed through `TextGenerationProvider`; local runs and tests use
+the deterministic `MockTextGenerationProvider` implementation.
 
 ## Run
 
