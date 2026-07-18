@@ -35,6 +35,7 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
 
     assert prompt.version == "v2"
     assert len(prompt.template_hash) == 64
+    assert len(prompt.rendered_hash) == 64
     assert context.shared_data["input"]["scenario_idea"]["title"] in prompt.text
     assert context.shared_data["input"]["scenario_idea"]["theme"] in prompt.text
     assert context.shared_data["input"]["scenario_idea"]["premise"] in prompt.text

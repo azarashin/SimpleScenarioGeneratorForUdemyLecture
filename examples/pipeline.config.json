@@ -5,6 +5,11 @@
     "timeout_seconds": 60,
     "api_key_env": "TEXT_GENERATION_API_KEY"
   },
+  "scenario_body_generation": {
+    "min_characters": 800,
+    "max_characters": 1600,
+    "require_event_mentions": true
+  },
   "temperature_policy": {
     "low_temperature": 0.2,
     "diversity_temperature": 0.7,

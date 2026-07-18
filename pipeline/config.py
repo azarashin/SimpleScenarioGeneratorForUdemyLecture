@@ -24,6 +24,13 @@ class TextGenerationConfig:
 
 
 @dataclass(slots=True)
+class ScenarioBodyGenerationConfig:
+    min_characters: int = 800
+    max_characters: int = 1600
+    require_event_mentions: bool = True
+
+
+@dataclass(slots=True)
 class RetryStrategyConfig:
     short_retries: int = 1
     prompt_revision_retries: int = 1
@@ -48,6 +55,9 @@ class AppConfig:
     trace_file_name: str = "trace.jsonl"
     image_generation: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
     text_generation: TextGenerationConfig = field(default_factory=TextGenerationConfig)
+    scenario_body_generation: ScenarioBodyGenerationConfig = field(
+        default_factory=ScenarioBodyGenerationConfig
+    )
     retry_strategy: RetryStrategyConfig = field(default_factory=RetryStrategyConfig)
     temperature_policy: TemperaturePolicyConfig = field(
         default_factory=TemperaturePolicyConfig
@@ -101,6 +111,13 @@ def _to_default_dict() -> dict[str, Any]:
             "timeout_seconds": DEFAULT_CONFIG.text_generation.timeout_seconds,
             "api_key_env": DEFAULT_CONFIG.text_generation.api_key_env,
         },
+        "scenario_body_generation": {
+            "min_characters": DEFAULT_CONFIG.scenario_body_generation.min_characters,
+            "max_characters": DEFAULT_CONFIG.scenario_body_generation.max_characters,
+            "require_event_mentions": (
+                DEFAULT_CONFIG.scenario_body_generation.require_event_mentions
+            ),
+        },
         "image_generation": {
             "provider": DEFAULT_CONFIG.image_generation.provider,
             "model": DEFAULT_CONFIG.image_generation.model,
@@ -122,6 +139,7 @@ def load_config(config_path: str | None) -> AppConfig:
 
     image_conf = merged.get("image_generation", {})
     text_conf = merged.get("text_generation", {})
+    body_conf = merged.get("scenario_body_generation", {})
     retry_conf = merged.get("retry_strategy", {})
     temperature_conf = merged.get("temperature_policy", {})
     short_retries = int(retry_conf.get("short_retries", 1))
@@ -143,6 +161,10 @@ def load_config(config_path: str | None) -> AppConfig:
         raise ValueError("Text generation provider, model, and api_key_env are required.")
     if timeout_seconds <= 0:
         raise ValueError("Text generation timeout_seconds must be greater than zero.")
+    min_characters = int(body_conf.get("min_characters", 800))
+    max_characters = int(body_conf.get("max_characters", 1600))
+    if min_characters <= 0 or max_characters < min_characters:
+        raise ValueError("Scenario body character limits are invalid.")
     return AppConfig(
         output_root=str(merged["output_root"]),
         artifacts_dir_name=str(merged["artifacts_dir_name"]),
@@ -160,6 +182,11 @@ def load_config(config_path: str | None) -> AppConfig:
             model=text_model,
             timeout_seconds=timeout_seconds,
             api_key_env=api_key_env,
+        ),
+        scenario_body_generation=ScenarioBodyGenerationConfig(
+            min_characters=min_characters,
+            max_characters=max_characters,
+            require_event_mentions=bool(body_conf.get("require_event_mentions", True)),
         ),
         retry_strategy=RetryStrategyConfig(
             short_retries=short_retries,

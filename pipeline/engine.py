@@ -169,7 +169,21 @@ class StepExecutionEngine:
                         section="output",
                         instance=result.output,
                     )
-                self.consistency_checker.check(context.shared_data, result.output)
+                consistency_data = {
+                    **context.shared_data,
+                    "_scenario_body_generation_config": {
+                        "min_characters": (
+                            context.config.scenario_body_generation.min_characters
+                        ),
+                        "max_characters": (
+                            context.config.scenario_body_generation.max_characters
+                        ),
+                        "require_event_mentions": (
+                            context.config.scenario_body_generation.require_event_mentions
+                        ),
+                    },
+                }
+                self.consistency_checker.check(consistency_data, result.output)
                 context.trace_logger.log(
                     {
                         "run_id": context.run_id,

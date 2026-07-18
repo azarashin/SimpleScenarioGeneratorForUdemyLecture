@@ -37,6 +37,29 @@ Scenario-section prompt `v2` is rendered once per target section. It includes th
 scenario idea, character profiles, chapter and section outline, previous state,
 allowed character IDs, the output schema bundle, and narration/dialogue constraints.
 
+Scenario sections are generated and schema-validated sequentially. Each accepted
+section is atomically checkpointed under `artifacts/sections/`; retries reload valid
+checkpoints and resume from the first missing or invalid section.
+
+The mock outline assigns a distinct purpose and required events to every section, and
+the scenario-body mock carries the previous section summary and events into the next
+section. Generated bodies must contain narration and dialogue, stay within the
+configured non-whitespace character range, and mention every required event.
+
+```json
+{
+  "scenario_body_generation": {
+    "min_characters": 800,
+    "max_characters": 1600,
+    "require_event_mentions": true
+  }
+}
+```
+
+To use the real OpenAI Responses API provider, install `requirements.txt`, set the
+configured API-key environment variable, and change `text_generation.provider` to
+`openai`. The provider requests strict JSON-schema output and never persists the key.
+
 ## Run
 
 ```powershell

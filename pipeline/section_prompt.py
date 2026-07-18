@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
@@ -14,6 +15,7 @@ class RenderedSectionPrompt:
     text: str
     version: str
     template_hash: str
+    rendered_hash: str
 
 
 class ScenarioSectionPromptBuilder:
@@ -69,7 +71,13 @@ class ScenarioSectionPromptBuilder:
                 f"Missing prompt template variable in {self.step_name} "
                 f"{definition.version}: {exc.args[0]}"
             ) from exc
-        return RenderedSectionPrompt(text, definition.version, definition.content_hash)
+        rendered_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return RenderedSectionPrompt(
+            text,
+            definition.version,
+            definition.content_hash,
+            rendered_hash,
+        )
 
     def _schema_bundle(self) -> dict[str, Any]:
         sections_schema = self._read_schema("scenario-sections.schema.json")
