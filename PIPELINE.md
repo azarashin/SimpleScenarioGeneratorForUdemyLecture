@@ -11,6 +11,7 @@
 - `step-03-generate-character-images`: キャラクター基本画像・表情差分生成
 - `step-04-generate-sections`: 章・節本文生成
 - `step-05-generate-dialogue-tags`: セリフ単位の話者・表情タグ生成
+- `step-06-render-html`: 目次・章・節HTMLと話者画像表示の生成
 
 シナリオ本文の生成契約は `SCENARIO_BODY_SPEC.md`、会話量を増やすための考え方と調整方法は
 `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。

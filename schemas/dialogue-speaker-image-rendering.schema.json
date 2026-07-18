@@ -25,7 +25,12 @@
       "speaker_id": { "$ref": "common.schema.json#/$defs/characterId" },
       "speaker_name": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
       "expression": { "$ref": "common.schema.json#/$defs/expression" },
-      "image_path": { "$ref": "common.schema.json#/$defs/filePath" },
+      "image_path": {
+        "oneOf": [
+          { "$ref": "common.schema.json#/$defs/filePath" },
+          { "type": "null" }
+        ]
+      },
       "alt": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
       "is_fallback": { "type": "boolean", "default": false }
     }

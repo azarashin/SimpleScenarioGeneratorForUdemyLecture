@@ -9,6 +9,7 @@ from typing import Any
 
 from PIL import Image
 
+from .asset_manager import CharacterAssetResolver
 from .character_image_prompt import CharacterImagePromptBuilder, EXPRESSION_CONCEPTS
 from .consistency import PipelineConsistencyChecker
 from .errors import ScenarioGenerationFallbackError
@@ -21,6 +22,7 @@ from .scenario_state import (
     validate_scenario_state,
 )
 from .section_prompt import ScenarioSectionPromptBuilder
+from .html_templates import render_chapter_page, render_index_page, render_section_page
 from .types import Step, StepContext, StepResult
 
 
@@ -1037,6 +1039,121 @@ class GenerateDialogueTagsStep(Step):
         return available[0], "利用可能な表情から既定値を選択"
 
 
+class RenderHtmlStep(Step):
+    name = "step-06-render-html"
+    schema_name = "step-06-render-html.schema.json"
+    input_keys = (
+        "scenario_outline",
+        "scenario_sections",
+        "dialogue_expression_tags",
+        "character_image_assets",
+    )
+
+    def run(self, context: StepContext) -> StepResult:
+        outline = context.shared_data["scenario_outline"]
+        sections = context.shared_data["scenario_sections"]
+        tags = context.shared_data["dialogue_expression_tags"]
+        run_root = Path(context.artifacts_dir).parent
+        resolver = CharacterAssetResolver.from_pipeline_data(
+            context.shared_data,
+            run_root=run_root,
+            verify_files=True,
+        )
+        sections_by_location = {
+            (section["chapter_no"], section["section_no"]): section
+            for section in sections
+        }
+
+        index_relative = Path("index.html")
+        self._write_html(run_root / index_relative, render_index_page(outline=outline))
+        chapter_pages: list[dict[str, Any]] = []
+        section_pages: list[dict[str, Any]] = []
+
+        for chapter in outline["chapters"]:
+            chapter_no = int(chapter["chapter_no"])
+            chapter_dir = Path(f"chapter-{chapter_no}")
+            chapter_relative = chapter_dir / "index.html"
+            self._write_html(
+                run_root / chapter_relative,
+                render_chapter_page(
+                    work_title=outline["title"],
+                    chapter=chapter,
+                    outline=outline,
+                ),
+            )
+            chapter_pages.append(
+                {"chapter_no": chapter_no, "path": chapter_relative.as_posix()}
+            )
+
+            for outline_section in chapter["sections"]:
+                section_no = int(outline_section["section_no"])
+                section = sections_by_location[(chapter_no, section_no)]
+                section_relative = chapter_dir / f"section-{section_no}.html"
+                self._write_html(
+                    run_root / section_relative,
+                    render_section_page(
+                        work_title=outline["title"],
+                        chapter=chapter,
+                        section=section,
+                        dialogue_tags=tags,
+                        asset_resolver=resolver,
+                        outline=outline,
+                    ),
+                )
+                section_pages.append(
+                    {
+                        "chapter_no": chapter_no,
+                        "section_no": section_no,
+                        "path": section_relative.as_posix(),
+                    }
+                )
+
+        rendering = []
+        for tag in tags:
+            resolved = resolver.resolve(
+                tag["speaker_id"],
+                tag["expression"],
+                relative_to=f"chapter-{tag['chapter_no']}",
+            )
+            rendering.append(
+                {
+                    "chapter_no": tag["chapter_no"],
+                    "section_no": tag["section_no"],
+                    "block_id": tag["block_id"],
+                    "speaker_id": tag["speaker_id"],
+                    "speaker_name": resolved.speaker_name,
+                    "expression": tag["expression"],
+                    "image_path": resolved.image_path,
+                    "alt": resolved.alt,
+                    "is_fallback": resolved.is_fallback,
+                }
+            )
+
+        return StepResult(
+            output={
+                "rendered_html_pages": {
+                    "index_path": index_relative.as_posix(),
+                    "chapter_pages": chapter_pages,
+                    "section_pages": section_pages,
+                },
+                "dialogue_speaker_image_rendering": rendering,
+            },
+            model="deterministic-template-renderer",
+            temperature=context.config.temperature_for(self.name),
+            metadata={
+                "html_page_count": 1 + len(chapter_pages) + len(section_pages),
+                "dialogue_rendering_count": len(rendering),
+            },
+        )
+
+    @staticmethod
+    def _write_html(path: Path, html: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(html, encoding="utf-8")
+        temporary.replace(path)
+
+
 def build_minimal_steps() -> list[Step]:
     return [
         GenerateCharacterProfilesStep(),
@@ -1044,4 +1161,5 @@ def build_minimal_steps() -> list[Step]:
         GenerateCharacterImagesStep(),
         GenerateSectionsStep(),
         GenerateDialogueTagsStep(),
+        RenderHtmlStep(),
     ]

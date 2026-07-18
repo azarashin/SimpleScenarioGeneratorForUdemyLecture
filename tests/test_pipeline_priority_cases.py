@@ -524,17 +524,18 @@ def test_pipeline_trace_records_prompt_version_and_hash(make_context) -> None:
         "step-03-generate-character-images": "v1",
         "step-04-generate-sections": "v2",
         "step-05-generate-dialogue-tags": None,
+        "step-06-render-html": None,
     }
     prompt_backed = [
-        event for event in succeeded if event["step"] != "step-05-generate-dialogue-tags"
+        event for event in succeeded if event["prompt_hash"] is not None
     ]
     assert all(len(event["prompt_hash"]) == 64 for event in prompt_backed)
-    dialogue_tags = next(
-        event
+    deterministic_steps = {
+        event["step"]: event
         for event in succeeded
-        if event["step"] == "step-05-generate-dialogue-tags"
-    )
-    assert dialogue_tags["prompt_hash"] is None
+        if event["step"] in {"step-05-generate-dialogue-tags", "step-06-render-html"}
+    }
+    assert all(event["prompt_hash"] is None for event in deterministic_steps.values())
 
 
 def test_prompt_impact_report_compares_run_metrics(tmp_path: Path) -> None:
