@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.config import AppConfig, ImageGenerationConfig, TextGenerationConfig
+from pipeline.image_generation import create_image_generation_provider
 from pipeline.state import RunStateStore
 from pipeline.trace import TraceLogger
 from pipeline.text_generation import create_text_generation_provider
@@ -77,6 +78,7 @@ def make_context(tmp_path: Path, base_config: AppConfig, input_payload: dict[str
             trace_logger=trace,
             shared_data=shared_data,
             text_generation_provider=create_text_generation_provider("mock"),
+            image_generation_provider=create_image_generation_provider("mock"),
         )
         return context, trace
 

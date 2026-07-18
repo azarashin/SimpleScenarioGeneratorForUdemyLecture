@@ -14,6 +14,26 @@
 シナリオ本文の生成契約は `SCENARIO_BODY_SPEC.md`、会話量を増やすための考え方と調整方法は
 `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。
 
+## 画像生成設定
+
+画像生成は `ImageGenerationProvider` を介して実行します。現在利用できる `mock` プロバイダーは、
+外部APIを呼び出さず、ローカル実行とテスト用の決定的なPNG画像を返します。
+
+```json
+{
+  "image_generation": {
+    "provider": "mock",
+    "model": "chat-gpt-image-2",
+    "width": 1024,
+    "height": 1024,
+    "style_preset": "anime"
+  }
+}
+```
+
+実画像を生成するプロバイダーは未実装です。キャラクター画像生成ステップを追加する際は、
+同じインターフェースへ実API用プロバイダーを実装します。
+
 ## テキスト生成設定
 
 テキスト生成は `TextGenerationProvider` を経由します。ローカル実行とテストでは決定的なモック実装を利用できます。

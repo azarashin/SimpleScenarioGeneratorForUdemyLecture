@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pipeline.config import load_config
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
+from pipeline.image_generation import create_image_generation_provider
 from pipeline.state import RunStateStore
 from pipeline.steps import build_minimal_steps
 from pipeline.trace import TraceLogger
@@ -47,6 +48,9 @@ def main() -> None:
             config.text_generation.provider,
             timeout_seconds=config.text_generation.timeout_seconds,
             api_key_env=config.text_generation.api_key_env,
+        ),
+        image_generation_provider=create_image_generation_provider(
+            config.image_generation.provider,
         ),
     )
 
