@@ -16,6 +16,8 @@
 Step 06を単独で実行する場合、メモリ上にないStep 01〜05の生成結果は
 `artifacts/step-NN-*.json` から自動的に読み込まれます。画像マニフェストのパスは
 runディレクトリを基準に解決され、HTML生成前に画像ファイルの存在が確認されます。
+HTMLは `output/<run-id>/index.html` と `chapter-N/` 以下へUTF-8で原子的に
+書き込まれ、runディレクトリ外を指すパスは拒否されます。
 
 シナリオ本文の生成契約は `SCENARIO_BODY_SPEC.md`、会話量を増やすための考え方と調整方法は
 `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。

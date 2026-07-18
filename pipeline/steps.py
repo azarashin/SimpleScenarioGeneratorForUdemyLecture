@@ -24,6 +24,7 @@ from .scenario_state import (
 )
 from .section_prompt import ScenarioSectionPromptBuilder
 from .html_templates import render_chapter_page, render_index_page, render_section_page
+from .html_output import HtmlOutputWriter
 from .types import Step, StepContext, StepResult
 
 
@@ -1071,6 +1072,7 @@ class RenderHtmlStep(Step):
         sections = context.shared_data["scenario_sections"]
         tags = context.shared_data["dialogue_expression_tags"]
         run_root = Path(context.artifacts_dir).parent
+        writer = HtmlOutputWriter(run_root)
         resolver = CharacterAssetResolver.from_pipeline_data(
             context.shared_data,
             run_root=run_root,
@@ -1081,17 +1083,15 @@ class RenderHtmlStep(Step):
             for section in sections
         }
 
-        index_relative = Path("index.html")
-        self._write_html(run_root / index_relative, render_index_page(outline=outline))
+        index_relative = writer.write("index.html", render_index_page(outline=outline))
         chapter_pages: list[dict[str, Any]] = []
         section_pages: list[dict[str, Any]] = []
 
         for chapter in outline["chapters"]:
             chapter_no = int(chapter["chapter_no"])
-            chapter_dir = Path(f"chapter-{chapter_no}")
-            chapter_relative = chapter_dir / "index.html"
-            self._write_html(
-                run_root / chapter_relative,
+            chapter_dir = f"chapter-{chapter_no}"
+            chapter_relative = writer.write(
+                f"{chapter_dir}/index.html",
                 render_chapter_page(
                     work_title=outline["title"],
                     chapter=chapter,
@@ -1099,15 +1099,14 @@ class RenderHtmlStep(Step):
                 ),
             )
             chapter_pages.append(
-                {"chapter_no": chapter_no, "path": chapter_relative.as_posix()}
+                {"chapter_no": chapter_no, "path": chapter_relative}
             )
 
             for outline_section in chapter["sections"]:
                 section_no = int(outline_section["section_no"])
                 section = sections_by_location[(chapter_no, section_no)]
-                section_relative = chapter_dir / f"section-{section_no}.html"
-                self._write_html(
-                    run_root / section_relative,
+                section_relative = writer.write(
+                    f"{chapter_dir}/section-{section_no}.html",
                     render_section_page(
                         work_title=outline["title"],
                         chapter=chapter,
@@ -1121,7 +1120,7 @@ class RenderHtmlStep(Step):
                     {
                         "chapter_no": chapter_no,
                         "section_no": section_no,
-                        "path": section_relative.as_posix(),
+                        "path": section_relative,
                     }
                 )
 
@@ -1149,7 +1148,7 @@ class RenderHtmlStep(Step):
         return StepResult(
             output={
                 "rendered_html_pages": {
-                    "index_path": index_relative.as_posix(),
+                    "index_path": index_relative,
                     "chapter_pages": chapter_pages,
                     "section_pages": section_pages,
                 },
@@ -1162,13 +1161,6 @@ class RenderHtmlStep(Step):
                 "dialogue_rendering_count": len(rendering),
             },
         )
-
-    @staticmethod
-    def _write_html(path: Path, html: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(html, encoding="utf-8")
-        temporary.replace(path)
 
 
 def build_minimal_steps() -> list[Step]:
