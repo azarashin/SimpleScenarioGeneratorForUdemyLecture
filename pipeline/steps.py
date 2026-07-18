@@ -143,6 +143,20 @@ class GenerateSectionsStep(Step):
             f"content was saved. Last error: {failure_reason}"
         )
 
+    def retry_phase_for_error(self, error: Exception) -> str | None:
+        if self._is_transient_provider_error(error):
+            return "short_retry"
+        if isinstance(error, ValueError):
+            return "prompt_revision"
+        return None
+
+    @staticmethod
+    def _is_transient_provider_error(error: Exception) -> bool:
+        if isinstance(error, (ConnectionError, TimeoutError)):
+            return True
+        error_name = type(error).__name__.casefold()
+        return "timeout" in error_name or "connection" in error_name
+
     def _run(
         self,
         context: StepContext,

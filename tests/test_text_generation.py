@@ -79,6 +79,55 @@ class FailAfterFirstSectionProvider(TextGenerationProvider):
         )
 
 
+class SchemaInvalidOnceProvider(TextGenerationProvider):
+    def __init__(self) -> None:
+        self.delegate = ScenarioBodyMockTextGenerationProvider()
+        self.prompts: list[str] = []
+
+    def generate_json(self, *, prompt: str, model: str, temperature: float):
+        self.prompts.append(prompt)
+        response = self.delegate.generate_json(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+        )
+        if len(self.prompts) == 1:
+            del response.data["scenario_sections"][0]["narrative_blocks"]
+        return response
+
+
+class TimeoutOnceProvider(TextGenerationProvider):
+    def __init__(self) -> None:
+        self.delegate = ScenarioBodyMockTextGenerationProvider()
+        self.prompts: list[str] = []
+
+    def generate_json(self, *, prompt: str, model: str, temperature: float):
+        self.prompts.append(prompt)
+        if len(self.prompts) == 1:
+            raise TimeoutError("request timed out")
+        return self.delegate.generate_json(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+        )
+
+
+class UnknownSpeakerProvider(TextGenerationProvider):
+    def __init__(self) -> None:
+        self.delegate = ScenarioBodyMockTextGenerationProvider()
+
+    def generate_json(self, *, prompt: str, model: str, temperature: float):
+        response = self.delegate.generate_json(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+        )
+        response.data["scenario_sections"][0]["narrative_blocks"][1][
+            "speaker_id"
+        ] = "undefined-character"
+        return response
+
+
 class FakeResponsesClient:
     def __init__(self, output_text: str) -> None:
         self.output_text = output_text
@@ -107,7 +156,7 @@ class UnderLengthOnceProvider(TextGenerationProvider):
             model=model,
             temperature=temperature,
         )
-        if self.calls <= 2:
+        if self.calls == 1:
             for block in response.data["scenario_sections"][0]["narrative_blocks"]:
                 block["text"] = "too short"
         return response
@@ -298,11 +347,71 @@ def test_invalid_llm_response_format_enters_retry_before_save(make_context) -> N
     assert provider.calls == 2
     assert any(
         event.get("event") == "step_retry_scheduled"
+        and event.get("retry_phase") == "prompt_revision"
         and "Markdown code fences" in event.get("previous_failure_reason", "")
         for event in trace.events
     )
     checkpoint = Path(context.artifacts_dir) / "sections" / "chapter-001-section-001.json"
     assert checkpoint.exists()
+
+
+def test_schema_violation_goes_directly_to_prompt_revision(make_context) -> None:
+    context, trace = make_context()
+    provider = SchemaInvalidOnceProvider()
+    context.text_generation_provider = provider
+
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+
+    assert len(output["scenario_sections"]) == 1
+    assert len(provider.prompts) == 2
+    assert "PROMPT REVISION" not in provider.prompts[0]
+    assert "PROMPT REVISION" in provider.prompts[1]
+    scheduled = [
+        event["retry_phase"]
+        for event in trace.events
+        if event.get("step") == "step-03-generate-sections"
+        and event.get("event") == "step_retry_scheduled"
+    ]
+    assert scheduled == ["prompt_revision"]
+
+
+def test_api_timeout_uses_short_retry_with_identical_prompt(make_context) -> None:
+    context, trace = make_context()
+    provider = TimeoutOnceProvider()
+    context.text_generation_provider = provider
+
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+
+    assert len(output["scenario_sections"]) == 1
+    assert len(provider.prompts) == 2
+    assert provider.prompts[0] == provider.prompts[1]
+    scheduled = [
+        event["retry_phase"]
+        for event in trace.events
+        if event.get("step") == "step-03-generate-sections"
+        and event.get("event") == "step_retry_scheduled"
+    ]
+    assert scheduled == ["short_retry"]
+
+
+def test_unknown_speaker_id_is_rejected(make_context) -> None:
+    context, trace = make_context()
+    context.config.retry_strategy.short_retries = 0
+    context.config.retry_strategy.prompt_revision_retries = 0
+    context.config.retry_strategy.fallback_enabled = False
+    context.text_generation_provider = UnknownSpeakerProvider()
+
+    with pytest.raises(RuntimeError, match="Step failed: step-03-generate-sections"):
+        StepExecutionEngine(build_minimal_steps()).run(context)
+
+    failures = [
+        event
+        for event in trace.events
+        if event.get("step") == "step-03-generate-sections"
+        and event.get("event") == "step_failed"
+    ]
+    assert len(failures) == 1
+    assert "unknown speaker 'undefined-character'" in failures[0]["failure_reason"]
 
 
 def test_invalid_section_is_retried_before_checkpoint_is_saved(make_context) -> None:
@@ -313,11 +422,11 @@ def test_invalid_section_is_retried_before_checkpoint_is_saved(make_context) -> 
     output = StepExecutionEngine(build_minimal_steps()).run(context)
 
     assert len(output["scenario_sections"]) == 1
-    assert provider.calls == 3
-    assert "PROMPT REVISION" in provider.prompts[2]
-    assert "前回の生成結果には次の問題がありました:" in provider.prompts[2]
-    assert "body length must be 800-1600" in provider.prompts[2]
-    assert "JSONだけを再出力してください" in provider.prompts[2]
+    assert provider.calls == 2
+    assert "PROMPT REVISION" in provider.prompts[1]
+    assert "前回の生成結果には次の問題がありました:" in provider.prompts[1]
+    assert "body length must be 800-1600" in provider.prompts[1]
+    assert "JSONだけを再出力してください" in provider.prompts[1]
     assert sum(event.get("event") == "section_generated" for event in trace.events) == 1
     checkpoint = Path(context.artifacts_dir) / "sections" / "chapter-001-section-001.json"
     payload = json.loads(checkpoint.read_text(encoding="utf-8"))
@@ -369,6 +478,35 @@ def test_section_fallback_fails_without_saving_synthetic_content(make_context) -
         for event in trace.events
         if event.get("event") == "step_failed"
     )
+    fallback_failures = [
+        event
+        for event in trace.events
+        if event.get("event") == "step_failed"
+        and event.get("retry_phase") == "fallback"
+    ]
+    assert len(fallback_failures) == 1
+
+
+def test_all_outline_sections_are_generated_in_outline_order(make_context) -> None:
+    context, _ = make_context()
+    context.shared_data["input"]["scenario_idea"]["target_length"] = {
+        "chapter_count": 2,
+        "sections_per_chapter": 2,
+    }
+
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+
+    expected = [
+        (chapter["chapter_no"], section["section_no"], section["section_title"])
+        for chapter in output["scenario_outline"]["chapters"]
+        for section in chapter["sections"]
+    ]
+    actual = [
+        (section["chapter_no"], section["section_no"], section["section_title"])
+        for section in output["scenario_sections"]
+    ]
+    assert len(actual) == 4
+    assert actual == expected
 
 
 def test_failed_run_keeps_completed_section_and_resume_only_generates_missing_one(

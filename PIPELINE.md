@@ -112,6 +112,10 @@ Scenario-section generation uses the same prompt for `short_retry`, appends the
 previous validation error and a JSON-only correction instruction for
 `prompt_revision`, and deliberately fails during `fallback` after retries are
 exhausted. It never inserts placeholder or fixed text into production artifacts.
+Provider connection and timeout errors are routed directly to `short_retry`.
+Malformed JSON, schema violations, and consistency or quality errors are routed
+directly to `prompt_revision`; once the matching phase is exhausted, only the final
+configured fallback remains.
 
 ## Consistency Checks
 

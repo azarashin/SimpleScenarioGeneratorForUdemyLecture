@@ -113,8 +113,12 @@ class StepExecutionEngine:
     def _run_single_step(self, step: Step, context: StepContext) -> bool:
         plans = self._build_attempt_plans(context)
         last_failure_reason = ""
+        plan_index = 0
+        attempts = 0
 
-        for attempts, plan in enumerate(plans, start=1):
+        while plan_index < len(plans):
+            plan = plans[plan_index]
+            attempts += 1
             context.state_store.upsert_step(
                 StepState(
                     name=step.name,
@@ -268,8 +272,12 @@ class StepExecutionEngine:
                     }
                 )
 
-                next_index = attempts
-                if next_index < len(plans):
+                next_index = self._next_plan_index(
+                    plans=plans,
+                    current_index=plan_index,
+                    preferred_phase=step.retry_phase_for_error(exc),
+                )
+                if next_index is not None:
                     next_plan = plans[next_index]
                     context.trace_logger.log(
                         {
@@ -282,8 +290,31 @@ class StepExecutionEngine:
                             "previous_failure_reason": reason,
                         }
                     )
+                    plan_index = next_index
+                    continue
+                break
 
         return False
+
+    @staticmethod
+    def _next_plan_index(
+        *,
+        plans: list[AttemptPlan],
+        current_index: int,
+        preferred_phase: str | None,
+    ) -> int | None:
+        remaining = range(current_index + 1, len(plans))
+        if preferred_phase is None:
+            next_index = current_index + 1
+            return next_index if next_index < len(plans) else None
+
+        for index in remaining:
+            if plans[index].phase == preferred_phase:
+                return index
+        for index in range(current_index + 1, len(plans)):
+            if plans[index].phase == "fallback":
+                return index
+        return None
 
     @staticmethod
     def _build_attempt_plans(context: StepContext) -> list[AttemptPlan]:

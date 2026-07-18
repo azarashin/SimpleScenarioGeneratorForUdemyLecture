@@ -40,7 +40,7 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
     assert context.shared_data["input"]["scenario_idea"]["theme"] in prompt.text
     assert context.shared_data["input"]["scenario_idea"]["premise"] in prompt.text
     assert section["section_purpose"] in prompt.text
-    assert section["key_events"][0] in prompt.text
+    assert all(event in prompt.text for event in section["key_events"])
     assert section["participating_characters"][0] in prompt.text
     assert "the key is missing" in prompt.text
     assert "scenario-sections.schema.json" in prompt.text

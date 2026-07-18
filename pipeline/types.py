@@ -46,6 +46,10 @@ class Step:
         """Produce the final fallback result. Override for deterministic fallback behavior."""
         return self.run(context)
 
+    def retry_phase_for_error(self, error: Exception) -> str | None:
+        """Optionally route an error directly to a compatible retry phase."""
+        return None
+
 
 from .config import AppConfig  # noqa: E402
 from .state import RunStateStore  # noqa: E402
