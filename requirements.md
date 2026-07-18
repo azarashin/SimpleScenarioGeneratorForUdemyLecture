@@ -70,10 +70,10 @@
     - `features` (string[])
     - `costume` (string)
   - `emotion_model` (object)
-    - `available_expressions` (string[])  # 例: neutral, happy, angry, sad, surprised
+    - `available_expressions` (string[])  # 4×4シート用の固定16表情
 - 受け入れ条件:
   - `character_id` が入力の `character_overviews` と一致する。
-  - `available_expressions` に `neutral` を含む。
+  - `available_expressions` は neutral から determined までの固定16表情を所定順で含む。
 
 ### 2-2. アウトライン（scenario_outline）
 - 生成元: `scenario_idea` + `character_profiles`
@@ -142,9 +142,10 @@
   - `expression_images` は `available_expressions` を少なくともすべてカバーする。
   - 画像パスは run ディレクトリを基準とする安全な相対パスである。
   - 画像形式は PNG、JPEG、WebP のいずれかで、拡張子と画像内容が一致する。
-  - 画像の実寸は `image_generation.width` と `image_generation.height` に一致する。
-  - 基本画像と各表情画像は画像単位のチェックポイントを持ち、成功済み画像を再利用できる。
-  - OpenAIプロバイダーの表情差分生成では、基本画像を編集入力として使用する。
+  - 基本画像の実寸は `image_generation.width` と `image_generation.height` に一致する。
+  - 各表情画像の実寸は4×4表情シートの幅・高さをそれぞれ4で割った値に一致する。
+  - 基本画像、4×4表情シート、各切り出し画像は画像単位のチェックポイントを持ち、成功済み成果物を再利用できる。
+  - OpenAIプロバイダーでは基本画像を参照入力として4×4表情シートを1枚生成し、16表情は固定座標でローカル切り出しする。
 
 ---
 

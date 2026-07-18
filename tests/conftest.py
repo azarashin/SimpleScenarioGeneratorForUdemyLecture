@@ -31,7 +31,10 @@ def base_config(tmp_path: Path) -> AppConfig:
         artifacts_dir_name="artifacts",
         state_file_name="run-state.json",
         trace_file_name="trace.jsonl",
-        image_generation=ImageGenerationConfig(),
+        image_generation=ImageGenerationConfig(
+            expression_sheet_width=1024,
+            expression_sheet_height=1024,
+        ),
         text_generation=TextGenerationConfig(model="test-model"),
     )
 

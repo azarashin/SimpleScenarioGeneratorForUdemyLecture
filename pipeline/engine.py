@@ -195,6 +195,12 @@ class StepExecutionEngine:
                     "_image_generation_config": {
                         "width": context.config.image_generation.width,
                         "height": context.config.image_generation.height,
+                        "expression_width": (
+                            context.config.image_generation.expression_sheet_width // 4
+                        ),
+                        "expression_height": (
+                            context.config.image_generation.expression_sheet_height // 4
+                        ),
                     },
                     "_scenario_body_generation_config": {
                         "min_characters": (

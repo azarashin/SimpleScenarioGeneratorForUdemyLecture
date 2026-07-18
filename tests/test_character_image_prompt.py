@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.character_image_prompt import CharacterImagePromptBuilder
+from pipeline.character_image_prompt import (
+    EXPRESSION_CONCEPTS,
+    CharacterImagePromptBuilder,
+)
 
 
 @pytest.fixture
@@ -27,7 +30,7 @@ def character_profile() -> dict[str, object]:
             "costume": "navy school blazer",
         },
         "emotion_model": {
-            "available_expressions": ["neutral", "happy", "sad"],
+            "available_expressions": [name for name, _ in EXPRESSION_CONCEPTS],
         },
     }
 
@@ -62,14 +65,14 @@ def test_expression_prompt_prioritizes_identity_consistency(
 ) -> None:
     prompt = CharacterImagePromptBuilder().build_expression(
         character_profile=character_profile,
-        expression="happy",
+        expression="smile",
         width=768,
         height=1024,
         style_preset="anime",
     )
 
     assert prompt.kind == "expression"
-    assert prompt.expression == "happy"
+    assert prompt.expression == "smile"
     assert "canonical base image" in prompt.text
     assert "change only the facial expression" in prompt.text
     assert "same face, hair, body proportions, costume" in prompt.text
@@ -82,9 +85,44 @@ def test_expression_prompt_rejects_expression_not_in_profile(
     with pytest.raises(ValueError, match="is not available"):
         CharacterImagePromptBuilder().build_expression(
             character_profile=character_profile,
-            expression="angry",
+            expression="joyful",
             width=1024,
             height=1024,
+            style_preset="anime",
+        )
+
+
+def test_expression_sheet_prompt_defines_ordered_4x4_layout(
+    character_profile: dict[str, object],
+) -> None:
+    prompt = CharacterImagePromptBuilder().build_expression_sheet(
+        character_profile=character_profile,
+        width=2048,
+        height=2048,
+        style_preset="anime",
+    )
+
+    assert prompt.kind == "expression_sheet"
+    assert prompt.expression == "expression-sheet-4x4"
+    assert "4 columns x 4 rows" in prompt.text
+    assert "2048x2048" in prompt.text
+    assert "1. neutral:" in prompt.text
+    assert "16. determined:" in prompt.text
+    assert "Do not include text" in prompt.text
+
+
+def test_expression_sheet_prompt_rejects_noncanonical_expression_order(
+    character_profile: dict[str, object],
+) -> None:
+    character_profile["emotion_model"]["available_expressions"] = list(
+        reversed(character_profile["emotion_model"]["available_expressions"])
+    )
+
+    with pytest.raises(ValueError, match="canonical 4x4 order"):
+        CharacterImagePromptBuilder().build_expression_sheet(
+            character_profile=character_profile,
+            width=2048,
+            height=2048,
             style_preset="anime",
         )
 

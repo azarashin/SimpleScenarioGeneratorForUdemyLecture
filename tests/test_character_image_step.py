@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
+from pipeline.character_image_prompt import EXPRESSION_CONCEPTS
 from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyChecker
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
 from pipeline.image_generation import (
@@ -58,21 +61,24 @@ def test_character_image_step_generates_base_and_expression_assets(make_context)
     asset = assets[0]
     assert asset["character_id"] == "c001"
     assert asset["base_image_path"] == "assets/characters/c001/base.png"
-    assert asset["expression_images"] == {
-        "neutral": "assets/characters/c001/base.png",
-        "happy": "assets/characters/c001/happy.png",
-        "sad": "assets/characters/c001/sad.png",
-    }
+    assert list(asset["expression_images"]) == [
+        name for name, _ in EXPRESSION_CONCEPTS
+    ]
+    assert asset["expression_images"]["neutral"] == (
+        "assets/characters/c001/expressions/neutral.png"
+    )
     run_root = Path(context.artifacts_dir).parent
     for relative_path in set(asset["expression_images"].values()):
         image_path = run_root / relative_path
         assert image_path.exists()
         assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    assert len(provider.requests) == 3
+        with Image.open(BytesIO(image_path.read_bytes())) as image:
+            assert image.size == (256, 256)
+    assert (run_root / "assets/characters/c001/expression-sheet.png").exists()
+    assert len(provider.requests) == 2
     assert provider.requests[0].model == "chat-gpt-image-2"
     assert provider.requests[0].reference_image_hash is None
     assert provider.requests[1].reference_image_hash is not None
-    assert provider.requests[2].reference_image_hash is not None
 
 
 def test_character_image_step_records_artifact_and_trace(make_context) -> None:
@@ -92,7 +98,7 @@ def test_character_image_step_records_artifact_and_trace(make_context) -> None:
     ]
     assert len(succeeded) == 1
     assert succeeded[0]["model"] == "chat-gpt-image-2"
-    assert succeeded[0]["prompt_version"] == "v1"
+    assert succeeded[0]["prompt_version"] == "v2"
     assert len(succeeded[0]["prompt_hash"]) == 64
 
 
@@ -102,17 +108,26 @@ def test_image_checkpoints_are_reused_without_provider_calls(make_context) -> No
     context.image_generation_provider = provider
     step = GenerateCharacterImagesStep()
     StepExecutionEngine([GenerateCharacterProfilesStep(), step]).run(context)
-    assert len(provider.requests) == 3
+    assert len(provider.requests) == 2
 
     step.run(context)
 
-    assert len(provider.requests) == 3
+    assert len(provider.requests) == 2
     loaded = [
         event
         for event in trace.events
         if event.get("event") == "image_checkpoint_loaded"
     ]
-    assert {event["expression"] for event in loaded} == {"base", "happy", "sad"}
+    assert {event["expression"] for event in loaded} == {
+        "base",
+        "expression-sheet",
+    }
+    crop_loaded = [
+        event
+        for event in trace.events
+        if event.get("event") == "expression_crop_checkpoint_loaded"
+    ]
+    assert len(crop_loaded) == 16
 
 
 def test_missing_image_regenerates_only_that_checkpoint(make_context) -> None:
@@ -127,7 +142,7 @@ def test_missing_image_regenerates_only_that_checkpoint(make_context) -> None:
 
     step.run(context)
 
-    assert len(provider.requests) == 4
+    assert len(provider.requests) == 2
     assert sad_path.exists()
 
 
@@ -141,7 +156,7 @@ def test_retry_resumes_after_completed_image_checkpoint(make_context) -> None:
     ).run(context)
 
     assert len(output["character_image_assets"]) == 1
-    assert provider.calls == 4
+    assert provider.calls == 3
     assert any(
         event.get("event") == "image_checkpoint_loaded"
         and event.get("expression") == "base"
@@ -160,7 +175,7 @@ def test_force_regenerates_all_images(make_context) -> None:
 
     engine.run(context, options=ExecutionOptions(force=True))
 
-    assert len(provider.requests) == 6
+    assert len(provider.requests) == 4
 
 
 def test_image_asset_consistency_rejects_missing_expression(make_context) -> None:
@@ -185,11 +200,11 @@ def test_image_asset_consistency_rejects_missing_or_corrupt_file(make_context) -
         [GenerateCharacterProfilesStep(), GenerateCharacterImagesStep()]
     ).run(context)
     run_root = Path(context.artifacts_dir).parent
-    happy_path = (
+    smile_path = (
         run_root
-        / output["character_image_assets"][0]["expression_images"]["happy"]
+        / output["character_image_assets"][0]["expression_images"]["smile"]
     )
-    happy_path.write_bytes(b"not an image")
+    smile_path.write_bytes(b"not an image")
 
     with pytest.raises(ConsistencyCheckError, match="not a supported image"):
         PipelineConsistencyChecker().check(
@@ -198,7 +213,7 @@ def test_image_asset_consistency_rejects_missing_or_corrupt_file(make_context) -
             run_root=run_root,
         )
 
-    happy_path.unlink()
+    smile_path.unlink()
     with pytest.raises(ConsistencyCheckError, match="file does not exist"):
         PipelineConsistencyChecker().check(
             output,

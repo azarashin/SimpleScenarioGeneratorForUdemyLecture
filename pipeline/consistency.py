@@ -49,6 +49,8 @@ class PipelineConsistencyChecker:
         image_config = data.get("_image_generation_config", {})
         expected_width = image_config.get("width")
         expected_height = image_config.get("height")
+        expression_width = image_config.get("expression_width", expected_width)
+        expression_height = image_config.get("expression_height", expected_height)
         for character_id, profile in profiles.items():
             asset = assets[character_id]
             available = set(
@@ -73,13 +75,16 @@ class PipelineConsistencyChecker:
                 **asset["expression_images"],
             }
             for label, relative_path in paths.items():
+                is_base = label == "base"
                 self._check_image_file(
                     character_id=character_id,
                     label=label,
                     relative_path=relative_path,
                     run_root=run_root,
-                    expected_width=expected_width,
-                    expected_height=expected_height,
+                    expected_width=(expected_width if is_base else expression_width),
+                    expected_height=(
+                        expected_height if is_base else expression_height
+                    ),
                 )
 
     def _check_image_file(

@@ -12,6 +12,8 @@ class ImageGenerationConfig:
     model: str = "chat-gpt-image-2"
     width: int = 1024
     height: int = 1024
+    expression_sheet_width: int = 2048
+    expression_sheet_height: int = 2048
     style_preset: str = "anime"
     quality: str = "high"
     output_format: str = "png"
@@ -131,6 +133,12 @@ def _to_default_dict() -> dict[str, Any]:
             "model": DEFAULT_CONFIG.image_generation.model,
             "width": DEFAULT_CONFIG.image_generation.width,
             "height": DEFAULT_CONFIG.image_generation.height,
+            "expression_sheet_width": (
+                DEFAULT_CONFIG.image_generation.expression_sheet_width
+            ),
+            "expression_sheet_height": (
+                DEFAULT_CONFIG.image_generation.expression_sheet_height
+            ),
             "style_preset": DEFAULT_CONFIG.image_generation.style_preset,
             "quality": DEFAULT_CONFIG.image_generation.quality,
             "output_format": DEFAULT_CONFIG.image_generation.output_format,
@@ -158,6 +166,8 @@ def load_config(config_path: str | None) -> AppConfig:
     image_model = str(image_conf.get("model", "")).strip()
     image_width = int(image_conf.get("width", 1024))
     image_height = int(image_conf.get("height", 1024))
+    expression_sheet_width = int(image_conf.get("expression_sheet_width", 2048))
+    expression_sheet_height = int(image_conf.get("expression_sheet_height", 2048))
     image_style = str(image_conf.get("style_preset", "")).strip()
     image_quality = str(image_conf.get("quality", "high")).strip().casefold()
     image_output_format = str(image_conf.get("output_format", "png")).strip().casefold()
@@ -167,8 +177,16 @@ def load_config(config_path: str | None) -> AppConfig:
         raise ValueError(
             "Image generation provider, model, style_preset, and api_key_env are required."
         )
-    if image_width <= 0 or image_height <= 0 or image_timeout <= 0:
+    if (
+        image_width <= 0
+        or image_height <= 0
+        or expression_sheet_width <= 0
+        or expression_sheet_height <= 0
+        or image_timeout <= 0
+    ):
         raise ValueError("Image generation dimensions and timeout must be greater than zero.")
+    if expression_sheet_width % 4 or expression_sheet_height % 4:
+        raise ValueError("Expression sheet dimensions must be divisible by 4.")
     if image_quality not in {"low", "medium", "high", "auto"}:
         raise ValueError("Image generation quality must be low, medium, high, or auto.")
     if image_output_format not in {"png", "jpeg", "webp"}:
@@ -210,6 +228,8 @@ def load_config(config_path: str | None) -> AppConfig:
             model=image_model,
             width=image_width,
             height=image_height,
+            expression_sheet_width=expression_sheet_width,
+            expression_sheet_height=expression_sheet_height,
             style_preset=image_style,
             quality=image_quality,
             output_format=image_output_format,

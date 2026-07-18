@@ -27,14 +27,21 @@
     "model": "chat-gpt-image-2",
     "width": 1024,
     "height": 1024,
+    "expression_sheet_width": 2048,
+    "expression_sheet_height": 2048,
     "style_preset": "anime",
     "quality": "high",
     "output_format": "png",
-    "timeout_seconds": 120,
+    "timeout_seconds": 300,
     "api_key_env": "OPENAI_API_KEY"
   }
 }
 ```
+
+`width` と `height` は基準画像、`expression_sheet_width` と
+`expression_sheet_height` は4×4表情シートの寸法です。表情画像はシートを16等分した寸法になります。
+既定値では基準画像が1024×1024、表情シートが2048×2048、各表情が512×512です。
+画像APIはキャラクターごとに基準画像と表情シートの計2回呼び出され、16枚の表情画像はローカルで切り出します。
 
 実画像の生成には `provider` を `openai` に変更し、`api_key_env` で指定した環境変数へAPIキーを
 設定します。基本画像はOpenAI Image APIの生成エンドポイント、表情差分は基本画像を参照する編集
@@ -260,7 +267,7 @@ output/<run-id>/artifacts/sections/chapter-NNN-section-NNN.rejected.json
   "prompt_versions": {
     "step-01-generate-character-profiles": "v1",
     "step-02-generate-outline": "v1",
-    "step-03-generate-character-images": "v1",
+    "step-03-generate-character-images": "v2",
     "step-04-generate-sections": "v2"
   }
 }
