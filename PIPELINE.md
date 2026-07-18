@@ -80,6 +80,31 @@ low value. A step result that reports another temperature is rejected.
 
 Trace events record both `temperature` and `temperature_mode`.
 
+## Prompt Versions and Impact Comparison
+
+Prompts are stored in `prompts/catalog.json`. Pin versions per step so reruns remain
+reproducible; if omitted, the latest catalog version is selected. Every successful
+trace records `prompt_version` and a SHA-256 `prompt_hash`.
+
+```json
+{
+  "prompt_versions": {
+    "step-01-generate-character-profiles": "v1",
+    "step-02-generate-outline": "v2",
+    "step-03-generate-sections": "v1"
+  }
+}
+```
+
+Compare two completed runs:
+
+```powershell
+python compare_prompt_runs.py output/run-baseline output/run-candidate
+```
+
+The report shows prompt changes and deltas for attempts, failures, duration, input
+and output tokens, plus whether each generated artifact changed.
+
 ## Outputs
 
 Generated under `output/<run-id>/`:

@@ -8,6 +8,11 @@
       "step-03-generate-sections"
     ]
   },
+  "prompt_versions": {
+    "step-01-generate-character-profiles": "v1",
+    "step-02-generate-outline": "v1",
+    "step-03-generate-sections": "v1"
+  },
   "retry_strategy": {
     "short_retries": 1,
     "prompt_revision_retries": 1,

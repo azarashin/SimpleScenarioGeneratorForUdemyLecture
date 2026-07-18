@@ -134,6 +134,7 @@ class StepExecutionEngine:
                     "attempt": attempts,
                     "retry_phase": plan.phase,
                     "phase_attempt": plan.phase_attempt,
+                    "prompt_version": context.config.prompt_versions.get(step.name),
                 }
             )
 
@@ -209,6 +210,8 @@ class StepExecutionEngine:
                         "phase_attempt": plan.phase_attempt,
                         "duration_ms": elapsed_ms,
                         "prompt": result.prompt,
+                        "prompt_version": result.prompt_version,
+                        "prompt_hash": result.prompt_hash,
                         "model": result.model or context.config.model_name,
                         "temperature": effective_temperature,
                         "temperature_mode": (

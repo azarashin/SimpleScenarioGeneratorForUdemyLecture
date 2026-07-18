@@ -14,6 +14,8 @@ from pipeline.config import (
 )
 from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyChecker
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
+from pipeline.prompt_impact import PromptImpactReporter
+from pipeline.prompts import PromptCatalog
 from pipeline.steps import GenerateCharacterProfilesStep, build_minimal_steps
 from pipeline.state import StepState
 from pipeline.types import Step, StepContext, StepResult
@@ -383,3 +385,67 @@ def test_temperature_policy_rejects_step_override(make_context) -> None:
     failures = [event for event in trace.events if event.get("event") == "step_failed"]
     assert failures
     assert all("Temperature policy violation" in event["failure_reason"] for event in failures)
+
+
+def test_prompt_catalog_supports_pinned_versions_and_hashes() -> None:
+    catalog = PromptCatalog()
+
+    v1 = catalog.resolve("step-02-generate-outline", "v1")
+    v2 = catalog.resolve("step-02-generate-outline", "v2")
+
+    assert v1.version == "v1"
+    assert v2.version == "v2"
+    assert v1.text != v2.text
+    assert v1.content_hash != v2.content_hash
+
+
+def test_pipeline_trace_records_prompt_version_and_hash(make_context) -> None:
+    context, trace = make_context()
+    context.config.prompt_versions = {
+        "step-01-generate-character-profiles": "v1",
+        "step-02-generate-outline": "v1",
+        "step-03-generate-sections": "v1",
+    }
+
+    StepExecutionEngine(build_minimal_steps()).run(context)
+
+    succeeded = [event for event in trace.events if event.get("event") == "step_succeeded"]
+    assert len(succeeded) == 3
+    assert all(event["prompt_version"] == "v1" for event in succeeded)
+    assert all(len(event["prompt_hash"]) == 64 for event in succeeded)
+
+
+def test_prompt_impact_report_compares_run_metrics(tmp_path: Path) -> None:
+    baseline = tmp_path / "run-baseline"
+    candidate = tmp_path / "run-candidate"
+    for run_root, version, prompt_hash, duration, artifact in (
+        (baseline, "v1", "hash-v1", 100, '{"value": 1}'),
+        (candidate, "v2", "hash-v2", 130, '{"value": 2}'),
+    ):
+        (run_root / "artifacts").mkdir(parents=True)
+        events = [
+            {"step": "step-a", "event": "step_started"},
+            {
+                "step": "step-a",
+                "event": "step_succeeded",
+                "prompt_version": version,
+                "prompt_hash": prompt_hash,
+                "duration_ms": duration,
+                "input_tokens": 10,
+                "output_tokens": 20,
+            },
+        ]
+        (run_root / "trace.jsonl").write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+            encoding="utf-8",
+        )
+        (run_root / "artifacts" / "step-a.json").write_text(artifact, encoding="utf-8")
+
+    report = PromptImpactReporter().compare(baseline, candidate)
+    step = report["steps"]["step-a"]
+
+    assert step["prompt_changed"] is True
+    assert step["baseline_prompt_version"] == "v1"
+    assert step["candidate_prompt_version"] == "v2"
+    assert step["duration_ms_delta"] == 30
+    assert step["artifact_changed"] is True

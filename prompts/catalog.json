@@ -1,0 +1,12 @@
+{
+  "step-01-generate-character-profiles": {
+    "v1": "Generate character profiles that preserve canonical IDs, names, and roles."
+  },
+  "step-02-generate-outline": {
+    "v1": "Generate a chronological scenario outline using only defined characters.",
+    "v2": "Generate a chronological scenario outline with explicit causal progression using only defined characters."
+  },
+  "step-03-generate-sections": {
+    "v1": "Generate scenario sections that follow the outline order and speaker constraints."
+  }
+}

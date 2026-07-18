@@ -44,6 +44,7 @@ class AppConfig:
     temperature_policy: TemperaturePolicyConfig = field(
         default_factory=TemperaturePolicyConfig
     )
+    prompt_versions: dict[str, str] = field(default_factory=dict)
 
     def temperature_for(self, step_name: str) -> float:
         if step_name in self.temperature_policy.diversity_steps:
@@ -81,6 +82,7 @@ def _to_default_dict() -> dict[str, Any]:
             "diversity_temperature": DEFAULT_CONFIG.temperature_policy.diversity_temperature,
             "diversity_steps": list(DEFAULT_CONFIG.temperature_policy.diversity_steps),
         },
+        "prompt_versions": dict(DEFAULT_CONFIG.prompt_versions),
         "image_generation": {
             "provider": DEFAULT_CONFIG.image_generation.provider,
             "model": DEFAULT_CONFIG.image_generation.model,
@@ -137,4 +139,8 @@ def load_config(config_path: str | None) -> AppConfig:
             diversity_temperature=diversity_temperature,
             diversity_steps=diversity_steps,
         ),
+        prompt_versions={
+            str(step): str(version)
+            for step, version in merged.get("prompt_versions", {}).items()
+        },
     )

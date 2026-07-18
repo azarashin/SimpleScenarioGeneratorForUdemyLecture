@@ -8,6 +8,8 @@ from typing import Any
 class StepResult:
     output: dict[str, Any]
     prompt: str | None = None
+    prompt_version: str | None = None
+    prompt_hash: str | None = None
     model: str | None = None
     temperature: float | None = None
     input_tokens: int | None = None

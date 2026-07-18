@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .prompts import resolve_step_prompt
 from .types import Step, StepContext, StepResult
 
 
@@ -11,6 +12,7 @@ class GenerateCharacterProfilesStep(Step):
     input_keys = ("character_overviews",)
 
     def run(self, context: StepContext) -> StepResult:
+        prompt = resolve_step_prompt(context, self.name)
         input_data = context.shared_data["input"]
         profiles: list[dict[str, Any]] = []
         for item in input_data["character_overviews"]:
@@ -42,7 +44,9 @@ class GenerateCharacterProfilesStep(Step):
 
         return StepResult(
             output={"character_profiles": profiles},
-            prompt="Generate character profiles",
+            prompt=prompt.text,
+            prompt_version=prompt.version,
+            prompt_hash=prompt.content_hash,
             model=context.config.model_name,
             temperature=context.config.temperature_for(self.name),
             input_tokens=120,
@@ -56,6 +60,7 @@ class GenerateOutlineStep(Step):
     input_keys = ("scenario_idea", "character_profiles")
 
     def run(self, context: StepContext) -> StepResult:
+        prompt = resolve_step_prompt(context, self.name)
         input_data = context.shared_data["input"]
         profile_ids = [x["character_id"] for x in context.shared_data["character_profiles"]]
         target = input_data["scenario_idea"]["target_length"]
@@ -90,7 +95,9 @@ class GenerateOutlineStep(Step):
 
         return StepResult(
             output={"scenario_outline": outline},
-            prompt="Generate scenario outline",
+            prompt=prompt.text,
+            prompt_version=prompt.version,
+            prompt_hash=prompt.content_hash,
             model=context.config.model_name,
             temperature=context.config.temperature_for(self.name),
             input_tokens=180,
@@ -104,6 +111,7 @@ class GenerateSectionsStep(Step):
     input_keys = ("character_profiles", "scenario_outline")
 
     def run(self, context: StepContext) -> StepResult:
+        prompt = resolve_step_prompt(context, self.name)
         outline = context.shared_data["scenario_outline"]
         sections_out: list[dict[str, Any]] = []
 
@@ -134,7 +142,9 @@ class GenerateSectionsStep(Step):
 
         return StepResult(
             output={"scenario_sections": sections_out},
-            prompt="Generate scenario sections",
+            prompt=prompt.text,
+            prompt_version=prompt.version,
+            prompt_hash=prompt.content_hash,
             model=context.config.model_name,
             temperature=context.config.temperature_for(self.name),
             input_tokens=220,
