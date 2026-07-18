@@ -59,6 +59,10 @@ configured non-whitespace character range, and mention every required event.
 To use the real OpenAI Responses API provider, install `requirements.txt`, set the
 configured API-key environment variable, and change `text_generation.provider` to
 `openai`. The provider requests strict JSON-schema output and never persists the key.
+The returned text must be exactly one JSON object (surrounding whitespace is allowed).
+Markdown code fences, explanatory prose, trailing content, arrays at the root, and
+duplicate object keys are rejected as response-format errors. These failures enter the
+normal retry strategy; only parsed, schema-valid, consistency-checked data is saved.
 
 ## Run
 

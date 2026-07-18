@@ -9,6 +9,55 @@ import json
 from typing import Any
 
 
+class LLMResponseFormatError(ValueError):
+    """Raised when an LLM response is not exactly one JSON object."""
+
+
+def extract_llm_json_text(raw_response: str) -> str:
+    """Extract a bare JSON object text while rejecting any surrounding content."""
+    if not isinstance(raw_response, str) or not raw_response.strip():
+        raise LLMResponseFormatError("LLM response is empty")
+
+    stripped = raw_response.strip()
+    if stripped.startswith("```") or stripped.endswith("```"):
+        raise LLMResponseFormatError(
+            "LLM response must be bare JSON without Markdown code fences"
+        )
+    if not stripped.startswith("{") or not stripped.endswith("}"):
+        raise LLMResponseFormatError(
+            "LLM response must contain only one JSON object without explanatory text"
+        )
+    return stripped
+
+
+def parse_llm_json_object(raw_response: str) -> dict[str, Any]:
+    """Extract and parse one JSON object, rejecting wrappers and duplicate keys."""
+    json_text = extract_llm_json_text(raw_response)
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise LLMResponseFormatError(
+                    f"LLM JSON response contains duplicate key: {key!r}"
+                )
+            result[key] = value
+        return result
+
+    try:
+        data = json.loads(json_text, object_pairs_hook=reject_duplicate_keys)
+    except LLMResponseFormatError:
+        raise
+    except json.JSONDecodeError as exc:
+        raise LLMResponseFormatError(
+            "LLM response must contain only one valid JSON object; "
+            "prose and trailing content are not allowed"
+        ) from exc
+    if not isinstance(data, dict):
+        raise LLMResponseFormatError("LLM JSON response must be an object")
+    return data
+
+
 @dataclass(frozen=True, slots=True)
 class GenerationResponse:
     data: dict[str, Any]
@@ -208,17 +257,7 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
                 }
             },
         )
-        output_text = response.output_text.strip()
-        if output_text.startswith("```"):
-            lines = output_text.splitlines()
-            if lines and lines[-1].strip() == "```":
-                output_text = "\n".join(lines[1:-1])
-        try:
-            data = json.loads(output_text)
-        except json.JSONDecodeError as exc:
-            raise ValueError("OpenAI response did not contain valid JSON") from exc
-        if not isinstance(data, dict):
-            raise ValueError("OpenAI JSON response must be an object")
+        data = parse_llm_json_object(response.output_text)
         usage = getattr(response, "usage", None)
         return GenerationResponse(
             data=data,

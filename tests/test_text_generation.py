@@ -8,8 +8,11 @@ import pytest
 
 from pipeline.text_generation import (
     GenerationResponse,
+    LLMResponseFormatError,
     MockTextGenerationProvider,
     OpenAITextGenerationProvider,
+    extract_llm_json_text,
+    parse_llm_json_object,
     ScenarioBodyMockTextGenerationProvider,
     TextGenerationProvider,
     create_text_generation_provider,
@@ -28,6 +31,22 @@ class FailSecondSectionProvider(TextGenerationProvider):
         self.calls += 1
         if self.calls == 2:
             raise RuntimeError("planned section failure")
+        return self.delegate.generate_json(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+        )
+
+
+class InvalidFormatOnceProvider(TextGenerationProvider):
+    def __init__(self) -> None:
+        self.delegate = ScenarioBodyMockTextGenerationProvider()
+        self.calls = 0
+
+    def generate_json(self, *, prompt: str, model: str, temperature: float):
+        self.calls += 1
+        if self.calls == 1:
+            parse_llm_json_object('```json\n{"scenario_sections": []}\n```')
         return self.delegate.generate_json(
             prompt=prompt,
             model=model,
@@ -205,8 +224,55 @@ def test_openai_provider_rejects_non_json_output() -> None:
         client=SimpleNamespace(responses=FakeResponsesClient("not-json")),
     )
 
-    with pytest.raises(ValueError, match="valid JSON"):
+    with pytest.raises(LLMResponseFormatError, match="JSON object"):
         provider.generate_json(prompt="p", model="m", temperature=0.2)
+
+
+@pytest.mark.parametrize(
+    "raw_response",
+    [
+        '```json\n{"scenario_sections": []}\n```',
+        'Here is the result: {"scenario_sections": []}',
+        '{"scenario_sections": []}\nGeneration complete.',
+    ],
+)
+def test_llm_json_parser_rejects_fences_and_explanatory_text(
+    raw_response: str,
+) -> None:
+    with pytest.raises(LLMResponseFormatError):
+        parse_llm_json_object(raw_response)
+
+
+def test_llm_json_parser_accepts_whitespace_around_one_object() -> None:
+    assert extract_llm_json_text(' \n {"scenario_sections": []}\t') == (
+        '{"scenario_sections": []}'
+    )
+    assert parse_llm_json_object(' \n {"scenario_sections": []}\t') == {
+        "scenario_sections": []
+    }
+
+
+def test_llm_json_parser_rejects_duplicate_keys() -> None:
+    with pytest.raises(LLMResponseFormatError, match="duplicate key"):
+        parse_llm_json_object('{"scenario_sections": [], "scenario_sections": []}')
+
+
+def test_invalid_llm_response_format_enters_retry_before_save(make_context) -> None:
+    context, trace = make_context()
+    provider = InvalidFormatOnceProvider()
+    context.text_generation_provider = provider
+
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+
+    assert len(output["scenario_sections"]) == 1
+    assert provider.calls == 2
+    assert any(
+        event.get("event") == "step_retry_scheduled"
+        and "Markdown code fences" in event.get("previous_failure_reason", "")
+        for event in trace.events
+    )
+    checkpoint = Path(context.artifacts_dir) / "sections" / "chapter-001-section-001.json"
+    assert checkpoint.exists()
 
 
 def test_invalid_section_is_retried_before_checkpoint_is_saved(make_context) -> None:
