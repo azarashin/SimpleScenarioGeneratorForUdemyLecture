@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.config import ImageGenerationConfig, load_config
+from pipeline.config import ImageGenerationConfig, RetryStrategyConfig, load_config
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
 from pipeline.steps import build_minimal_steps
 from pipeline.state import StepState
@@ -42,6 +42,31 @@ class FlakyStep(Step):
         if self.calls <= self.fail_times:
             raise RuntimeError(f"planned-fail-{self.calls}")
         return StepResult(output=self.output)
+
+
+class StrategyAwareStep(Step):
+    def __init__(self) -> None:
+        self.phases: list[str] = []
+        self.failure_reasons: list[str] = []
+
+    name = "strategy-aware"
+
+    def run(self, context: StepContext) -> StepResult:
+        phase = "initial" if not self.phases else "short_retry"
+        self.phases.append(phase)
+        raise RuntimeError(f"{phase}-failed")
+
+    def run_with_prompt_revision(
+        self, context: StepContext, failure_reason: str
+    ) -> StepResult:
+        self.phases.append("prompt_revision")
+        self.failure_reasons.append(failure_reason)
+        raise RuntimeError("prompt-revision-failed")
+
+    def run_fallback(self, context: StepContext, failure_reason: str) -> StepResult:
+        self.phases.append("fallback")
+        self.failure_reasons.append(failure_reason)
+        return StepResult(output={"fallback": True})
 
 
 def test_p0_skip_completed_step_and_load_artifact(make_context) -> None:
@@ -116,14 +141,39 @@ def test_p0_retry_and_failure_state_tracking(make_context, base_config) -> None:
 
     out = engine.run(context)
 
-    assert flaky.calls == base_config.max_retries + 1
+    assert flaky.calls == 2
     assert out["ok"] is True
     state = context.state_store.get_step("step-flaky")
     assert state is not None
     assert state.status == "completed"
-    assert state.attempts == base_config.max_retries + 1
+    assert state.attempts == 2
     assert any(e.get("event") == "step_failed" for e in trace.events)
     assert any(e.get("event") == "step_succeeded" for e in trace.events)
+
+
+def test_retry_strategy_runs_distinct_phases(make_context) -> None:
+    context, trace = make_context()
+    context.config.retry_strategy = RetryStrategyConfig(
+        short_retries=1,
+        prompt_revision_retries=1,
+        fallback_enabled=True,
+    )
+    step = StrategyAwareStep()
+
+    output = StepExecutionEngine([step]).run(context)
+
+    assert output["fallback"] is True
+    assert step.phases == ["initial", "short_retry", "prompt_revision", "fallback"]
+    assert step.failure_reasons == ["short_retry-failed", "prompt-revision-failed"]
+    scheduled_phases = [
+        event["retry_phase"]
+        for event in trace.events
+        if event.get("event") == "step_retry_scheduled"
+    ]
+    assert scheduled_phases == ["short_retry", "prompt_revision", "fallback"]
+    state = context.state_store.get_step(step.name)
+    assert state is not None
+    assert state.retry_phase == "fallback"
 
 
 def test_p1_force_true_reexecutes_completed_step(make_context) -> None:
@@ -171,7 +221,7 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     conf = load_config(str(cfg_path))
 
     assert conf.model_name == "overridden"
-    assert conf.max_retries == 2
+    assert conf.retry_strategy == RetryStrategyConfig()
     assert conf.image_generation.provider == "stub"
     assert conf.image_generation.model == ImageGenerationConfig().model
 
@@ -207,10 +257,16 @@ def test_schema_invalid_output_is_rejected_and_retried(make_context, base_config
     with pytest.raises(RuntimeError, match="Step failed"):
         engine.run(context)
 
-    assert step.calls == base_config.max_retries + 1
+    expected_attempts = (
+        1
+        + base_config.retry_strategy.short_retries
+        + base_config.retry_strategy.prompt_revision_retries
+        + int(base_config.retry_strategy.fallback_enabled)
+    )
+    assert step.calls == expected_attempts
     assert not Path(context.artifacts_dir, f"{step.name}.json").exists()
     failures = [event for event in trace.events if event.get("event") == "step_failed"]
-    assert len(failures) == base_config.max_retries + 1
+    assert len(failures) == expected_attempts
     assert all("Schema validation failed" in str(event["failure_reason"]) for event in failures)
 
 

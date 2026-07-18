@@ -33,6 +33,16 @@ class Step:
     def run(self, context: StepContext) -> StepResult:
         raise NotImplementedError
 
+    def run_with_prompt_revision(
+        self, context: StepContext, failure_reason: str
+    ) -> StepResult:
+        """Retry with a corrected prompt. Override in model-backed steps."""
+        return self.run(context)
+
+    def run_fallback(self, context: StepContext, failure_reason: str) -> StepResult:
+        """Produce the final fallback result. Override for deterministic fallback behavior."""
+        return self.run(context)
+
 
 from .config import AppConfig  # noqa: E402
 from .state import RunStateStore  # noqa: E402

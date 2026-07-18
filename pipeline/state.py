@@ -13,6 +13,7 @@ class StepState:
     started_at: str | None = None
     finished_at: str | None = None
     attempts: int = 0
+    retry_phase: str | None = None
     error_reason: str | None = None
     artifact_path: str | None = None
 
@@ -40,6 +41,7 @@ class RunStateStore:
             started_at=raw.get("started_at"),
             finished_at=raw.get("finished_at"),
             attempts=int(raw.get("attempts", 0)),
+            retry_phase=raw.get("retry_phase"),
             error_reason=raw.get("error_reason"),
             artifact_path=raw.get("artifact_path"),
         )
@@ -51,6 +53,7 @@ class RunStateStore:
             "started_at": step.started_at,
             "finished_at": step.finished_at,
             "attempts": step.attempts,
+            "retry_phase": step.retry_phase,
             "error_reason": step.error_reason,
             "artifact_path": step.artifact_path,
         }
@@ -66,6 +69,7 @@ class RunStateStore:
                 started_at=raw.get("started_at"),
                 finished_at=raw.get("finished_at"),
                 attempts=int(raw.get("attempts", 0)),
+                retry_phase=raw.get("retry_phase"),
                 error_reason=raw.get("error_reason"),
                 artifact_path=raw.get("artifact_path"),
             )

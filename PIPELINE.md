@@ -33,6 +33,24 @@ python run_pipeline.py --run-id run-20260718-101010 --from-step step-03-generate
 python run_pipeline.py --run-id run-20260718-101010 --force
 ```
 
+## Retry Strategy
+
+Retries run in separate phases: a short retry, a prompt-revision retry that receives
+the previous failure reason, and one final fallback attempt.
+
+```json
+{
+  "retry_strategy": {
+    "short_retries": 1,
+    "prompt_revision_retries": 1,
+    "fallback_enabled": true
+  }
+}
+```
+
+Model-backed steps can override `run_with_prompt_revision` and `run_fallback` to
+provide phase-specific behavior. Trace events and run state include `retry_phase`.
+
 ## Outputs
 
 Generated under `output/<run-id>/`:

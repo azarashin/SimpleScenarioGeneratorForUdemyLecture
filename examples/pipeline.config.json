@@ -1,7 +1,11 @@
 {
   "model_name": "gpt-5.3-codex",
   "temperature": 0.6,
-  "max_retries": 2,
+  "retry_strategy": {
+    "short_retries": 1,
+    "prompt_revision_retries": 1,
+    "fallback_enabled": true
+  },
   "output_root": "output",
   "artifacts_dir_name": "artifacts",
   "state_file_name": "run-state.json",
