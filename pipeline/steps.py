@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .errors import ScenarioGenerationFallbackError
 from .prompts import resolve_step_prompt
 from .schema_validation import StepSchemaValidator
 from .scenario_quality import ScenarioBodyQualityChecker
@@ -132,7 +133,10 @@ class GenerateSectionsStep(Step):
         return self._run(context, retry_feedback=failure_reason)
 
     def run_fallback(self, context: StepContext, failure_reason: str) -> StepResult:
-        return self._run(context, retry_feedback=failure_reason)
+        raise ScenarioGenerationFallbackError(
+            "Scenario section generation exhausted retries; no synthetic fallback "
+            f"content was saved. Last error: {failure_reason}"
+        )
 
     def _run(
         self,
@@ -205,12 +209,7 @@ class GenerateSectionsStep(Step):
                     )
                     generation_prompt = rendered_prompt.text
                     if retry_feedback:
-                        generation_prompt += (
-                            "\n\nRETRY CORRECTION\n"
-                            "The previous attempt failed validation for this pipeline. "
-                            "Correct the issue while preserving all other requirements:\n"
-                            f"{retry_feedback}"
-                        )
+                        generation_prompt += self._prompt_revision(retry_feedback)
                     response = context.text_generation_provider.generate_json(
                         prompt=generation_prompt,
                         model=context.config.text_generation.model,
@@ -318,6 +317,17 @@ class GenerateSectionsStep(Step):
         except (KeyError, TypeError, ValueError):
             return None
         return section
+
+    @staticmethod
+    def _prompt_revision(failure_reason: str) -> str:
+        reasons = [line.strip() for line in failure_reason.splitlines() if line.strip()]
+        bullet_list = "\n".join(f"- {reason}" for reason in reasons)
+        return (
+            "\n\nPROMPT REVISION\n"
+            "前回の生成結果には次の問題がありました:\n"
+            f"{bullet_list}\n\n"
+            "問題を修正し、他の要件を維持したJSONだけを再出力してください。"
+        )
 
     @staticmethod
     def _write_checkpoint(

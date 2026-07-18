@@ -54,6 +54,15 @@ class InvalidFormatOnceProvider(TextGenerationProvider):
         )
 
 
+class AlwaysFailProvider(TextGenerationProvider):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate_json(self, *, prompt: str, model: str, temperature: float):
+        self.calls += 1
+        raise ConnectionError("provider unavailable")
+
+
 class FakeResponsesClient:
     def __init__(self, output_text: str) -> None:
         self.output_text = output_text
@@ -284,8 +293,10 @@ def test_invalid_section_is_retried_before_checkpoint_is_saved(make_context) -> 
 
     assert len(output["scenario_sections"]) == 1
     assert provider.calls == 3
-    assert "RETRY CORRECTION" in provider.prompts[2]
+    assert "PROMPT REVISION" in provider.prompts[2]
+    assert "前回の生成結果には次の問題がありました:" in provider.prompts[2]
     assert "body length must be 800-1600" in provider.prompts[2]
+    assert "JSONだけを再出力してください" in provider.prompts[2]
     assert sum(event.get("event") == "section_generated" for event in trace.events) == 1
     checkpoint = Path(context.artifacts_dir) / "sections" / "chapter-001-section-001.json"
     payload = json.loads(checkpoint.read_text(encoding="utf-8"))
@@ -315,3 +326,25 @@ def test_invalid_existing_checkpoint_is_regenerated(make_context) -> None:
 
     assert len(output["scenario_sections"]) == 1
     assert len(provider.requests) == 1
+
+
+def test_section_fallback_fails_without_saving_synthetic_content(make_context) -> None:
+    context, trace = make_context()
+    context.config.retry_strategy.short_retries = 0
+    context.config.retry_strategy.prompt_revision_retries = 0
+    context.config.retry_strategy.fallback_enabled = True
+    provider = AlwaysFailProvider()
+    context.text_generation_provider = provider
+
+    with pytest.raises(RuntimeError, match="Step failed: step-03-generate-sections"):
+        StepExecutionEngine(build_minimal_steps()).run(context)
+
+    assert provider.calls == 1
+    assert not (Path(context.artifacts_dir) / "step-03-generate-sections.json").exists()
+    assert not (Path(context.artifacts_dir) / "sections").exists()
+    assert any(
+        event.get("retry_phase") == "fallback"
+        and "no synthetic fallback content was saved" in event.get("failure_reason", "")
+        for event in trace.events
+        if event.get("event") == "step_failed"
+    )

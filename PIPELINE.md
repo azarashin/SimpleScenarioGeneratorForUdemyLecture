@@ -105,6 +105,10 @@ the previous failure reason, and one final fallback attempt.
 
 Model-backed steps can override `run_with_prompt_revision` and `run_fallback` to
 provide phase-specific behavior. Trace events and run state include `retry_phase`.
+Scenario-section generation uses the same prompt for `short_retry`, appends the
+previous validation error and a JSON-only correction instruction for
+`prompt_revision`, and deliberately fails during `fallback` after retries are
+exhausted. It never inserts placeholder or fixed text into production artifacts.
 
 ## Consistency Checks
 
