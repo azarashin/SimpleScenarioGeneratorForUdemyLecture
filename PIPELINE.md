@@ -236,6 +236,7 @@ output/<run-id>/artifacts/sections/chapter-NNN-section-NNN.rejected.json
   "prompt_versions": {
     "step-01-generate-character-profiles": "v1",
     "step-02-generate-outline": "v1",
+    "step-03-generate-character-images": "v1",
     "step-04-generate-sections": "v2"
   }
 }
