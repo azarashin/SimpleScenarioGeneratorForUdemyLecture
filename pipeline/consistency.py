@@ -129,6 +129,8 @@ class PipelineConsistencyChecker:
                     valid_character_ids=valid_characters,
                     min_characters=body_config["min_characters"],
                     max_characters=body_config["max_characters"],
+                    min_dialogue_blocks=body_config.get("min_dialogue_blocks", 1),
+                    max_dialogue_blocks=body_config.get("max_dialogue_blocks", 2**31 - 1),
                     require_event_mentions=body_config["require_event_mentions"],
                 )
 

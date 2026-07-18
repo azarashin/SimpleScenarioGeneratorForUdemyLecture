@@ -188,6 +188,10 @@ class GenerateSectionsStep(Step):
                     chapter=chapter,
                     section=section,
                     previous_state=previous_state,
+                    min_characters=quality_config.min_characters,
+                    max_characters=quality_config.max_characters,
+                    min_dialogue_blocks=quality_config.min_dialogue_blocks,
+                    max_dialogue_blocks=quality_config.max_dialogue_blocks,
                     version=requested_version,
                 )
                 rendered_prompts.append(rendered_prompt)
@@ -204,6 +208,8 @@ class GenerateSectionsStep(Step):
                     valid_character_ids,
                     quality_config.min_characters,
                     quality_config.max_characters,
+                    quality_config.min_dialogue_blocks,
+                    quality_config.max_dialogue_blocks,
                     quality_config.require_event_mentions,
                 )
                 if checkpoint is not None:
@@ -245,14 +251,54 @@ class GenerateSectionsStep(Step):
                         raise ValueError("Section generation must return exactly one section")
                     generated_section = generated_sections[0]
                     self._validate_target(generated_section, chapter, section)
-                    quality_checker.check_section(
-                        generated_section=generated_section,
-                        outline_section=section,
-                        valid_character_ids=valid_character_ids,
-                        min_characters=quality_config.min_characters,
-                        max_characters=quality_config.max_characters,
-                        require_event_mentions=quality_config.require_event_mentions,
-                    )
+                    try:
+                        quality_checker.check_section(
+                            generated_section=generated_section,
+                            outline_section=section,
+                            valid_character_ids=valid_character_ids,
+                            min_characters=quality_config.min_characters,
+                            max_characters=quality_config.max_characters,
+                            min_dialogue_blocks=quality_config.min_dialogue_blocks,
+                            max_dialogue_blocks=quality_config.max_dialogue_blocks,
+                            require_event_mentions=quality_config.require_event_mentions,
+                        )
+                    except ValueError as exc:
+                        rejected_path = checkpoint_path.with_name(
+                            f"{checkpoint_path.stem}.rejected.json"
+                        )
+                        rejected_path.parent.mkdir(parents=True, exist_ok=True)
+                        metrics = self._section_metrics(generated_section)
+                        rejected_path.write_text(
+                            json.dumps(
+                                {
+                                    "failure_reason": str(exc),
+                                    "metrics": metrics,
+                                    "required": {
+                                        "min_characters": quality_config.min_characters,
+                                        "max_characters": quality_config.max_characters,
+                                        "min_dialogue_blocks": quality_config.min_dialogue_blocks,
+                                        "max_dialogue_blocks": quality_config.max_dialogue_blocks,
+                                    },
+                                    "section": generated_section,
+                                },
+                                ensure_ascii=False,
+                                indent=2,
+                            ),
+                            encoding="utf-8",
+                        )
+                        context.trace_logger.log(
+                            {
+                                "run_id": context.run_id,
+                                "step": self.name,
+                                "event": "section_validation_failed",
+                                "chapter_no": chapter["chapter_no"],
+                                "section_no": section["section_no"],
+                                "failure_reason": str(exc),
+                                "metrics": metrics,
+                                "rejected_path": str(rejected_path),
+                            }
+                        )
+                        raise
                     state_after = advance_scenario_state(
                         previous_state,
                         chapter_no=chapter["chapter_no"],
@@ -308,6 +354,8 @@ class GenerateSectionsStep(Step):
         valid_character_ids: set[str],
         min_characters: int,
         max_characters: int,
+        min_dialogue_blocks: int,
+        max_dialogue_blocks: int,
         require_event_mentions: bool,
     ) -> tuple[dict[str, Any], dict[str, Any]] | None:
         if not path.exists():
@@ -333,6 +381,8 @@ class GenerateSectionsStep(Step):
                 valid_character_ids=valid_character_ids,
                 min_characters=min_characters,
                 max_characters=max_characters,
+                min_dialogue_blocks=min_dialogue_blocks,
+                max_dialogue_blocks=max_dialogue_blocks,
                 require_event_mentions=require_event_mentions,
             )
             validate_scenario_state(
@@ -344,6 +394,20 @@ class GenerateSectionsStep(Step):
         except (KeyError, TypeError, ValueError):
             return None
         return section, state_after
+
+    @staticmethod
+    def _section_metrics(section: dict[str, Any]) -> dict[str, int]:
+        blocks = section.get("narrative_blocks", [])
+        return {
+            "non_whitespace_characters": sum(
+                not character.isspace()
+                for block in blocks
+                for character in str(block.get("text", ""))
+            ),
+            "narration_blocks": sum(block.get("type") == "narration" for block in blocks),
+            "dialogue_blocks": sum(block.get("type") == "dialogue" for block in blocks),
+            "total_blocks": len(blocks),
+        }
 
     @staticmethod
     def _prompt_revision(failure_reason: str) -> str:

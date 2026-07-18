@@ -46,6 +46,7 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
     assert "scenario-sections.schema.json" in prompt.text
     assert "narration requires speaker_id=null" in prompt.text
     assert "dialogue requires a speaker_id" in prompt.text
+    assert "20 to 40 dialogue blocks" in prompt.text
     assert '"maxItems": 1' in prompt.text
     assert '{"scenario_sections": [one target section]}' in prompt.text
 

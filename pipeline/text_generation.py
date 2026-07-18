@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import os
 import json
+import re
 from typing import Any
 
 
@@ -152,7 +153,6 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
             chapter, _ = json.JSONDecoder().raw_decode(prompt[chapter_start:])
             chapter_no = chapter["chapter_no"]
         section_no = section["section_no"]
-        speaker_id = section["participating_characters"][0]
         events = " / ".join(section["key_events"])
         purpose = section["section_purpose"]
         previous_start = prompt.index(self.previous_state_marker) + len(
@@ -176,23 +176,47 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
             if previous_events
             else ""
         )
-        seed = (
+        narration = (
             f"Continuing from the established state ({previous_summary}), chapter "
             f"{chapter_no} section {section_no} advances this distinct purpose: {purpose}. "
             f"The scene explicitly develops the required events: {events}.{carryover} "
+            "Characters observe the consequences, react according to their established "
+            "roles, and move the situation forward without skipping causal steps. "
         )
-        paragraphs = []
-        while sum(len(item) for item in paragraphs) < 850:
-            index = len(paragraphs) + 1
-            paragraphs.append(
-                f"Beat {index}: {seed} Characters observe the consequences, react according "
-                f"to their established roles, and move the situation forward without skipping "
-                f"the causal steps of this section. "
-            )
-        narration = "".join(paragraphs)
         dialogue = (
             f"We carry the previous situation forward and confront these events now: {events}."
         )
+        dialogue_match = re.search(
+            r"Include narration and (\d+) to (\d+) dialogue blocks", prompt
+        )
+        dialogue_count = int(dialogue_match.group(1)) if dialogue_match else 1
+        dialogue_blocks = [
+            {
+                "block_id": f"b-{chapter_no}-{section_no}-{index + 2}",
+                "type": "dialogue",
+                "text": dialogue if index == 0 else f"Turn {index + 1} advances.",
+                "speaker_id": section["participating_characters"][
+                    index % len(section["participating_characters"])
+                ],
+            }
+            for index in range(dialogue_count)
+        ]
+        character_match = re.search(
+            r"Produce (\d+) to (\d+) non-whitespace characters", prompt
+        )
+        min_characters = int(character_match.group(1)) if character_match else 800
+        max_characters = int(character_match.group(2)) if character_match else 1600
+        dialogue_characters = sum(
+            sum(not character.isspace() for character in block["text"])
+            for block in dialogue_blocks
+        )
+        narration_characters = sum(not character.isspace() for character in narration)
+        target_characters = min(max_characters, min_characters + 100)
+        padding_needed = max(
+            0, target_characters - dialogue_characters - narration_characters
+        )
+        if padding_needed:
+            narration += " " + ("x" * padding_needed)
         payload = {
             "scenario_sections": [
                 {
@@ -206,12 +230,7 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
                             "text": narration,
                             "speaker_id": None,
                         },
-                        {
-                            "block_id": f"b-{chapter_no}-{section_no}-2",
-                            "type": "dialogue",
-                            "text": dialogue,
-                            "speaker_id": speaker_id,
-                        },
+                        *dialogue_blocks,
                     ],
                 }
             ]
