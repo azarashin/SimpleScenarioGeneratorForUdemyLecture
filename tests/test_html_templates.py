@@ -1,8 +1,10 @@
 import pytest
 
 from pipeline.html_templates import (
+    build_chapter_navigation,
     build_section_navigation,
     render_chapter_page,
+    render_index_page,
     render_section_page,
 )
 
@@ -28,6 +30,37 @@ def test_chapter_template_lists_sections_and_escapes_content():
     assert 'href="section-1.html"' in html
     assert 'href="section-2.html"' in html
     assert "<script>" not in html
+
+
+def test_index_template_links_every_chapter_and_section():
+    html = render_index_page(outline=_outline())
+
+    assert 'aria-label="目次"' in html
+    assert 'href="chapter-1/index.html"' in html
+    assert 'href="chapter-1/section-1.html"' in html
+    assert 'href="chapter-1/section-2.html"' in html
+    assert 'href="chapter-2/index.html"' in html
+    assert 'href="chapter-2/section-1.html"' in html
+
+
+def test_chapter_template_builds_previous_next_and_index_links():
+    html = render_chapter_page(
+        work_title="物語", chapter=_outline()["chapters"][1], outline=_outline()
+    )
+
+    assert 'href="../chapter-1/index.html" rel="previous"' in html
+    assert 'href="../index.html">目次へ戻る</a>' in html
+    assert 'rel="next"' not in html
+
+
+def test_chapter_navigation_handles_boundaries():
+    first = build_chapter_navigation(_outline(), chapter_no=1)
+    last = build_chapter_navigation(_outline(), chapter_no=2)
+
+    assert first.previous_href is None
+    assert first.next_href == "../chapter-2/index.html"
+    assert last.previous_href == "../chapter-1/index.html"
+    assert last.next_href is None
 
 
 def test_section_template_renders_blocks_images_and_navigation():

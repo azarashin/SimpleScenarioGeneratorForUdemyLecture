@@ -20,6 +20,37 @@ class SectionNavigation:
     index_href: str = "../index.html"
 
 
+@dataclass(frozen=True, slots=True)
+class ChapterNavigation:
+    """Relative links available from one generated chapter page."""
+
+    previous_href: str | None
+    next_href: str | None
+    index_href: str = "../index.html"
+
+
+def build_chapter_navigation(
+    outline: dict[str, Any], *, chapter_no: int
+) -> ChapterNavigation:
+    chapter_numbers = [int(chapter["chapter_no"]) for chapter in outline["chapters"]]
+    try:
+        position = chapter_numbers.index(chapter_no)
+    except ValueError as exc:
+        raise ValueError(f"Chapter is not present in outline: chapter {chapter_no}") from exc
+
+    def href(target_chapter: int) -> str:
+        return f"../chapter-{target_chapter}/index.html"
+
+    return ChapterNavigation(
+        previous_href=href(chapter_numbers[position - 1]) if position > 0 else None,
+        next_href=(
+            href(chapter_numbers[position + 1])
+            if position + 1 < len(chapter_numbers)
+            else None
+        ),
+    )
+
+
 def build_section_navigation(
     outline: dict[str, Any], *, chapter_no: int, section_no: int
 ) -> SectionNavigation:
@@ -53,14 +84,50 @@ def _template(name: str) -> Template:
     return Template((TEMPLATE_DIR / name).read_text(encoding="utf-8"))
 
 
+def render_index_page(*, outline: dict[str, Any]) -> str:
+    """Render a table of contents linking every chapter and section."""
+    chapters = []
+    for chapter in outline["chapters"]:
+        chapter_no = int(chapter["chapter_no"])
+        sections = []
+        for section in chapter["sections"]:
+            section_no = int(section["section_no"])
+            sections.append(
+                '<li><a href="chapter-{0}/section-{1}.html">第{1}節 {2}</a></li>'.format(
+                    chapter_no, section_no, escape(str(section["section_title"]))
+                )
+            )
+        chapters.append(
+            '<li class="chapter"><h2><a href="chapter-{0}/index.html">第{0}章 {1}</a></h2>'
+            '<ol class="sections">{2}</ol></li>'.format(
+                chapter_no,
+                escape(str(chapter["chapter_title"])),
+                "".join(sections),
+            )
+        )
+    return _template("index.html").substitute(
+        work_title=escape(str(outline["title"])),
+        logline=escape(str(outline.get("logline", ""))),
+        chapter_links="".join(chapters),
+    )
+
+
 def render_chapter_page(
     *,
     work_title: str,
     chapter: dict[str, Any],
+    outline: dict[str, Any] | None = None,
+    previous_chapter_href: str | None = None,
+    next_chapter_href: str | None = None,
     index_href: str = "../index.html",
 ) -> str:
     """Render one chapter landing page from a scenario-outline chapter."""
     chapter_no = int(chapter["chapter_no"])
+    if outline is not None:
+        navigation = build_chapter_navigation(outline, chapter_no=chapter_no)
+        previous_chapter_href = navigation.previous_href
+        next_chapter_href = navigation.next_href
+        index_href = navigation.index_href
     links = []
     for section in chapter["sections"]:
         section_no = int(section["section_no"])
@@ -76,6 +143,10 @@ def render_chapter_page(
         chapter_title=escape(str(chapter["chapter_title"])),
         chapter_goal=escape(str(chapter["chapter_goal"])),
         section_links="".join(links),
+        previous_chapter_link=_nav_link(
+            previous_chapter_href, "前の章", "previous"
+        ),
+        next_chapter_link=_nav_link(next_chapter_href, "次の章", "next"),
         index_href=escape(index_href, quote=True),
     )
 
