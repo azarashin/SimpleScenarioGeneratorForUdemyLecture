@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .consistency import PipelineConsistencyChecker
 from .state import RunStateStore, StepState
 from .schema_validation import StepSchemaValidator
 from .types import Step, StepContext, StepResult
@@ -32,9 +33,11 @@ class StepExecutionEngine:
         self,
         steps: list[Step],
         schema_validator: StepSchemaValidator | None = None,
+        consistency_checker: PipelineConsistencyChecker | None = None,
     ) -> None:
         self.steps = steps
         self.schema_validator = schema_validator or StepSchemaValidator()
+        self.consistency_checker = consistency_checker or PipelineConsistencyChecker()
 
     def run(self, context: StepContext, options: ExecutionOptions | None = None) -> dict[str, object]:
         opts = options or ExecutionOptions()
@@ -152,6 +155,16 @@ class StepExecutionEngine:
                         section="output",
                         instance=result.output,
                     )
+                self.consistency_checker.check(context.shared_data, result.output)
+                context.trace_logger.log(
+                    {
+                        "run_id": context.run_id,
+                        "step": step.name,
+                        "event": "consistency_checked",
+                        "attempt": attempts,
+                        "retry_phase": plan.phase,
+                    }
+                )
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
 
                 artifact_path = Path(context.artifacts_dir) / f"{step.name}.json"

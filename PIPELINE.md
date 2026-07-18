@@ -51,6 +51,14 @@ the previous failure reason, and one final fallback attempt.
 Model-backed steps can override `run_with_prompt_revision` and `run_fallback` to
 provide phase-specific behavior. Trace events and run state include `retry_phase`.
 
+## Consistency Checks
+
+Before an artifact is saved, the runner automatically rejects contradictions in
+character IDs, names, and roles; ambiguous normalized character names; unknown
+participants or speakers; duplicate block IDs; and chapter/section timeline drift.
+Failures enter the configured retry strategy and successful checks emit a
+`consistency_checked` trace event.
+
 ## Outputs
 
 Generated under `output/<run-id>/`:

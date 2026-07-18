@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from pipeline.config import ImageGenerationConfig, RetryStrategyConfig, load_config
+from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyChecker
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
-from pipeline.steps import build_minimal_steps
+from pipeline.steps import GenerateCharacterProfilesStep, build_minimal_steps
 from pipeline.state import StepState
 from pipeline.types import Step, StepContext, StepResult
 
@@ -67,6 +69,17 @@ class StrategyAwareStep(Step):
         self.phases.append("fallback")
         self.failure_reasons.append(failure_reason)
         return StepResult(output={"fallback": True})
+
+
+class ContradictingProfileStep(GenerateCharacterProfilesStep):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, context: StepContext) -> StepResult:
+        self.calls += 1
+        result = super().run(context)
+        result.output["character_profiles"][0]["name"] = "inconsistent-name"
+        return result
 
 
 def test_p0_skip_completed_step_and_load_artifact(make_context) -> None:
@@ -278,3 +291,53 @@ def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
     assert "character_profiles" in output
     assert "scenario_outline" in output
     assert "scenario_sections" in output
+
+
+def test_character_contradiction_enters_retry_strategy(make_context, base_config) -> None:
+    context, trace = make_context()
+    step = ContradictingProfileStep()
+
+    with pytest.raises(RuntimeError, match="Step failed"):
+        StepExecutionEngine([step]).run(context)
+
+    expected_attempts = (
+        1
+        + base_config.retry_strategy.short_retries
+        + base_config.retry_strategy.prompt_revision_retries
+        + int(base_config.retry_strategy.fallback_enabled)
+    )
+    assert step.calls == expected_attempts
+    failures = [event for event in trace.events if event.get("event") == "step_failed"]
+    assert all("inconsistent name" in str(event["failure_reason"]) for event in failures)
+
+
+def test_consistency_checker_rejects_timeline_drift(make_context) -> None:
+    context, _ = make_context()
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+    drifted_sections = deepcopy(output["scenario_sections"])
+    drifted_sections[0]["section_title"] = "different-title"
+
+    with pytest.raises(ConsistencyCheckError, match="section timeline differs"):
+        PipelineConsistencyChecker().check(
+            output,
+            {"scenario_sections": drifted_sections},
+        )
+
+
+def test_consistency_checker_rejects_ambiguous_character_names(make_context) -> None:
+    context, _ = make_context()
+    context.shared_data["input"]["character_overviews"].append(
+        {
+            "character_id": "c002",
+            "name": "Ｎ",
+            "role": "other",
+            "summary": "s",
+        }
+    )
+    profiles = GenerateCharacterProfilesStep().run(context).output["character_profiles"]
+
+    with pytest.raises(ConsistencyCheckError, match="ambiguous character naming"):
+        PipelineConsistencyChecker().check(
+            context.shared_data,
+            {"character_profiles": profiles},
+        )
