@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.config import ImageGenerationConfig, RetryStrategyConfig, load_config
+from pipeline.config import (
+    ImageGenerationConfig,
+    RetryStrategyConfig,
+    TemperaturePolicyConfig,
+    load_config,
+)
 from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyChecker
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
 from pipeline.steps import GenerateCharacterProfilesStep, build_minimal_steps
@@ -26,7 +31,7 @@ class ConstantOutputStep(Step):
             output=self.output,
             prompt=f"prompt:{self.name}",
             model="test-model",
-            temperature=0.1,
+            temperature=context.config.temperature_for(self.name),
             input_tokens=10,
             output_tokens=20,
         )
@@ -80,6 +85,13 @@ class ContradictingProfileStep(GenerateCharacterProfilesStep):
         result = super().run(context)
         result.output["character_profiles"][0]["name"] = "inconsistent-name"
         return result
+
+
+class TemperatureBypassStep(Step):
+    name = "temperature-bypass"
+
+    def run(self, context: StepContext) -> StepResult:
+        return StepResult(output={"ok": True}, temperature=1.5)
 
 
 def test_p0_skip_completed_step_and_load_artifact(make_context) -> None:
@@ -235,6 +247,7 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
 
     assert conf.model_name == "overridden"
     assert conf.retry_strategy == RetryStrategyConfig()
+    assert conf.temperature_policy == TemperaturePolicyConfig()
     assert conf.image_generation.provider == "stub"
     assert conf.image_generation.model == ImageGenerationConfig().model
 
@@ -341,3 +354,32 @@ def test_consistency_checker_rejects_ambiguous_character_names(make_context) -> 
             context.shared_data,
             {"character_profiles": profiles},
         )
+
+
+def test_temperature_policy_limits_diversity_to_selected_steps(make_context) -> None:
+    context, trace = make_context()
+
+    StepExecutionEngine(build_minimal_steps()).run(context)
+
+    succeeded = {
+        event["step"]: event
+        for event in trace.events
+        if event.get("event") == "step_succeeded"
+    }
+    assert succeeded["step-01-generate-character-profiles"]["temperature"] == 0.2
+    assert succeeded["step-01-generate-character-profiles"]["temperature_mode"] == "deterministic"
+    assert succeeded["step-02-generate-outline"]["temperature"] == 0.7
+    assert succeeded["step-02-generate-outline"]["temperature_mode"] == "diversity"
+    assert succeeded["step-03-generate-sections"]["temperature"] == 0.7
+    assert succeeded["step-03-generate-sections"]["temperature_mode"] == "diversity"
+
+
+def test_temperature_policy_rejects_step_override(make_context) -> None:
+    context, trace = make_context()
+
+    with pytest.raises(RuntimeError, match="Step failed"):
+        StepExecutionEngine([TemperatureBypassStep()]).run(context)
+
+    failures = [event for event in trace.events if event.get("event") == "step_failed"]
+    assert failures
+    assert all("Temperature policy violation" in event["failure_reason"] for event in failures)

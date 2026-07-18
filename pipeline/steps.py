@@ -44,7 +44,7 @@ class GenerateCharacterProfilesStep(Step):
             output={"character_profiles": profiles},
             prompt="Generate character profiles",
             model=context.config.model_name,
-            temperature=context.config.temperature,
+            temperature=context.config.temperature_for(self.name),
             input_tokens=120,
             output_tokens=240,
         )
@@ -92,7 +92,7 @@ class GenerateOutlineStep(Step):
             output={"scenario_outline": outline},
             prompt="Generate scenario outline",
             model=context.config.model_name,
-            temperature=context.config.temperature,
+            temperature=context.config.temperature_for(self.name),
             input_tokens=180,
             output_tokens=360,
         )
@@ -136,7 +136,7 @@ class GenerateSectionsStep(Step):
             output={"scenario_sections": sections_out},
             prompt="Generate scenario sections",
             model=context.config.model_name,
-            temperature=context.config.temperature,
+            temperature=context.config.temperature_for(self.name),
             input_tokens=220,
             output_tokens=440,
         )

@@ -59,6 +59,27 @@ participants or speakers; duplicate block IDs; and chapter/section timeline drif
 Failures enter the configured retry strategy and successful checks emit a
 `consistency_checked` trace event.
 
+## Temperature Policy
+
+Generation uses a low temperature by default. A higher diversity temperature is
+allowed only for explicitly listed creative steps; all other steps are fixed to the
+low value. A step result that reports another temperature is rejected.
+
+```json
+{
+  "temperature_policy": {
+    "low_temperature": 0.2,
+    "diversity_temperature": 0.7,
+    "diversity_steps": [
+      "step-02-generate-outline",
+      "step-03-generate-sections"
+    ]
+  }
+}
+```
+
+Trace events record both `temperature` and `temperature_mode`.
+
 ## Outputs
 
 Generated under `output/<run-id>/`:

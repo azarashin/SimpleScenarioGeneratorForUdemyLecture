@@ -24,6 +24,10 @@ class AttemptPlan:
     phase_attempt: int
 
 
+class DeterminismPolicyError(ValueError):
+    """Raised when a step attempts to bypass the configured temperature policy."""
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -149,6 +153,15 @@ class StepExecutionEngine:
                     plan=plan,
                     failure_reason=last_failure_reason,
                 )
+                effective_temperature = context.config.temperature_for(step.name)
+                if (
+                    result.temperature is not None
+                    and result.temperature != effective_temperature
+                ):
+                    raise DeterminismPolicyError(
+                        f"Temperature policy violation for {step.name}: "
+                        f"expected {effective_temperature}, got {result.temperature}"
+                    )
                 if step.schema_name:
                     self.schema_validator.validate(
                         schema_name=step.schema_name,
@@ -197,9 +210,12 @@ class StepExecutionEngine:
                         "duration_ms": elapsed_ms,
                         "prompt": result.prompt,
                         "model": result.model or context.config.model_name,
-                        "temperature": result.temperature
-                        if result.temperature is not None
-                        else context.config.temperature,
+                        "temperature": effective_temperature,
+                        "temperature_mode": (
+                            "diversity"
+                            if step.name in context.config.temperature_policy.diversity_steps
+                            else "deterministic"
+                        ),
                         "input_tokens": result.input_tokens,
                         "output_tokens": result.output_tokens,
                     }
