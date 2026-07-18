@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 from string import Template
@@ -7,6 +8,45 @@ from typing import Any, Iterable
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+
+
+@dataclass(frozen=True, slots=True)
+class SectionNavigation:
+    """Relative links available from one generated section page."""
+
+    previous_href: str | None
+    next_href: str | None
+    chapter_href: str = "index.html"
+    index_href: str = "../index.html"
+
+
+def build_section_navigation(
+    outline: dict[str, Any], *, chapter_no: int, section_no: int
+) -> SectionNavigation:
+    """Build previous/next links in outline order, including chapter boundaries."""
+    locations = [
+        (int(chapter["chapter_no"]), int(section["section_no"]))
+        for chapter in outline["chapters"]
+        for section in chapter["sections"]
+    ]
+    target = (chapter_no, section_no)
+    try:
+        position = locations.index(target)
+    except ValueError as exc:
+        raise ValueError(
+            f"Section is not present in outline: chapter {chapter_no}, section {section_no}"
+        ) from exc
+
+    def href(location: tuple[int, int]) -> str:
+        target_chapter, target_section = location
+        if target_chapter == chapter_no:
+            return f"section-{target_section}.html"
+        return f"../chapter-{target_chapter}/section-{target_section}.html"
+
+    return SectionNavigation(
+        previous_href=href(locations[position - 1]) if position > 0 else None,
+        next_href=href(locations[position + 1]) if position + 1 < len(locations) else None,
+    )
 
 
 def _template(name: str) -> Template:
@@ -46,13 +86,25 @@ def render_section_page(
     chapter: dict[str, Any],
     section: dict[str, Any],
     dialogue_tags: Iterable[dict[str, Any]] = (),
-    characters: dict[str, dict[str, str]] | None = None,
+    characters: dict[str, dict[str, Any]] | None = None,
+    outline: dict[str, Any] | None = None,
     previous_href: str | None = None,
     next_href: str | None = None,
     chapter_href: str = "index.html",
     index_href: str = "../index.html",
 ) -> str:
     """Render a section page; all user-authored text and attributes are escaped."""
+    if outline is not None:
+        navigation = build_section_navigation(
+            outline,
+            chapter_no=int(chapter["chapter_no"]),
+            section_no=int(section["section_no"]),
+        )
+        previous_href = navigation.previous_href
+        next_href = navigation.next_href
+        chapter_href = navigation.chapter_href
+        index_href = navigation.index_href
+
     tag_by_block = {str(tag["block_id"]): tag for tag in dialogue_tags}
     character_map = characters or {}
     blocks = []
