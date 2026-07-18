@@ -159,10 +159,18 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
             self.previous_state_marker
         )
         previous_state, _ = json.JSONDecoder().raw_decode(prompt[previous_start:])
-        previous_summary = str(
-            previous_state.get("previous_section_summary", "The story begins here.")
-        )[:180]
-        previous_events = " / ".join(previous_state.get("previous_key_events", []))
+        previous_section = previous_state.get("previous_section")
+        previous_summary = "The story begins here."
+        if isinstance(previous_section, dict):
+            previous_summary = " ".join(
+                block.get("text", "")
+                for block in previous_section.get("narrative_blocks", [])
+            )[:180]
+        previous_events = " / ".join(
+            str(item.get("event", ""))
+            for item in previous_state.get("occurred_events", [])[-4:]
+            if isinstance(item, dict)
+        )
         carryover = (
             f" Previous events carried forward: {previous_events}."
             if previous_events

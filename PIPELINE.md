@@ -118,6 +118,17 @@ participants or speakers; duplicate block IDs; and chapter/section timeline drif
 Failures enter the configured retry strategy and successful checks emit a
 `consistency_checked` trace event.
 
+## Section State
+
+Each section checkpoint stores a validated `state_after` object alongside the
+generated section. It carries character locations, possessions, known information,
+relationship changes, occurred events, unresolved plot threads, and the complete
+previous section. The next section receives this object in its prompt. On resume, the
+pipeline restores state from the checkpoint and rejects a checkpoint whose saved
+state does not match its section. The complete previous section is retained for this
+initial implementation; it can later be replaced by a separately generated summary
+for long-form scenarios.
+
 ## Temperature Policy
 
 Generation uses a low temperature by default. A higher diversity temperature is

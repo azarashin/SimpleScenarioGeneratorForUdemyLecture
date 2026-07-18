@@ -8,6 +8,11 @@ from .errors import ScenarioGenerationFallbackError
 from .prompts import resolve_step_prompt
 from .schema_validation import StepSchemaValidator
 from .scenario_quality import ScenarioBodyQualityChecker
+from .scenario_state import (
+    advance_scenario_state,
+    create_initial_scenario_state,
+    validate_scenario_state,
+)
 from .section_prompt import ScenarioSectionPromptBuilder
 from .types import Step, StepContext, StepResult
 
@@ -155,7 +160,7 @@ class GenerateSectionsStep(Step):
             profile["character_id"] for profile in character_profiles
         }
         rendered_prompts = []
-        previous_state: dict[str, Any] = {"status": "story_start"}
+        previous_state = create_initial_scenario_state(valid_character_ids)
         sections_out: list[dict[str, Any]] = []
         input_tokens = 0
         output_tokens = 0
@@ -175,7 +180,7 @@ class GenerateSectionsStep(Step):
                 checkpoint_path = checkpoint_dir / (
                     f"chapter-{chapter['chapter_no']:03d}-section-{section['section_no']:03d}.json"
                 )
-                generated_section = self._load_checkpoint(
+                checkpoint = self._load_checkpoint(
                     checkpoint_path,
                     rendered_prompt.rendered_hash,
                     schema_validator,
@@ -187,7 +192,8 @@ class GenerateSectionsStep(Step):
                     quality_config.max_characters,
                     quality_config.require_event_mentions,
                 )
-                if generated_section is not None:
+                if checkpoint is not None:
+                    generated_section, state_after = checkpoint
                     context.trace_logger.log(
                         {
                             "run_id": context.run_id,
@@ -233,10 +239,17 @@ class GenerateSectionsStep(Step):
                         max_characters=quality_config.max_characters,
                         require_event_mentions=quality_config.require_event_mentions,
                     )
+                    state_after = advance_scenario_state(
+                        previous_state,
+                        chapter_no=chapter["chapter_no"],
+                        outline_section=section,
+                        generated_section=generated_section,
+                    )
                     self._write_checkpoint(
                         checkpoint_path,
                         rendered_prompt.rendered_hash,
                         generated_section,
+                        state_after,
                     )
                     input_tokens += response.input_tokens or 0
                     output_tokens += response.output_tokens or 0
@@ -251,14 +264,7 @@ class GenerateSectionsStep(Step):
                         }
                     )
                 sections_out.append(generated_section)
-                previous_state = {
-                    "previous_chapter_no": chapter["chapter_no"],
-                    "previous_section_no": section["section_no"],
-                    "previous_key_events": list(section["key_events"]),
-                    "previous_section_summary": " ".join(
-                        block["text"] for block in generated_section["narrative_blocks"]
-                    ),
-                }
+                previous_state = state_after
 
         prompt = rendered_prompts[0]
 
@@ -289,7 +295,7 @@ class GenerateSectionsStep(Step):
         min_characters: int,
         max_characters: int,
         require_event_mentions: bool,
-    ) -> dict[str, Any] | None:
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
         if not path.exists():
             return None
         try:
@@ -299,6 +305,7 @@ class GenerateSectionsStep(Step):
         if payload.get("prompt_hash") != prompt_hash:
             return None
         section = payload.get("section")
+        state_after = payload.get("state_after")
         try:
             validator.validate(
                 schema_name=self.schema_name,
@@ -314,9 +321,15 @@ class GenerateSectionsStep(Step):
                 max_characters=max_characters,
                 require_event_mentions=require_event_mentions,
             )
+            validate_scenario_state(
+                state_after,
+                expected_character_ids=valid_character_ids,
+            )
+            if state_after["previous_section"] != section:
+                raise ValueError("Checkpoint state does not match its generated section")
         except (KeyError, TypeError, ValueError):
             return None
-        return section
+        return section, state_after
 
     @staticmethod
     def _prompt_revision(failure_reason: str) -> str:
@@ -334,12 +347,17 @@ class GenerateSectionsStep(Step):
         path: Path,
         prompt_hash: str,
         section: dict[str, Any],
+        state_after: dict[str, Any],
     ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = path.with_suffix(".tmp")
         temp_path.write_text(
             json.dumps(
-                {"prompt_hash": prompt_hash, "section": section},
+                {
+                    "prompt_hash": prompt_hash,
+                    "section": section,
+                    "state_after": state_after,
+                },
                 ensure_ascii=False,
                 indent=2,
             ),
