@@ -258,7 +258,7 @@ def test_section_retry_reuses_completed_checkpoint(make_context) -> None:
     assert len(output["scenario_sections"]) == 2
     assert provider.calls == 3
     integrated_artifact = (
-        Path(context.artifacts_dir) / "step-03-generate-sections.json"
+        Path(context.artifacts_dir) / "step-04-generate-sections.json"
     )
     integrated = json.loads(integrated_artifact.read_text(encoding="utf-8"))
     assert len(integrated["scenario_sections"]) == 2
@@ -369,7 +369,7 @@ def test_schema_violation_goes_directly_to_prompt_revision(make_context) -> None
     scheduled = [
         event["retry_phase"]
         for event in trace.events
-        if event.get("step") == "step-03-generate-sections"
+        if event.get("step") == "step-04-generate-sections"
         and event.get("event") == "step_retry_scheduled"
     ]
     assert scheduled == ["prompt_revision"]
@@ -388,7 +388,7 @@ def test_api_timeout_uses_short_retry_with_identical_prompt(make_context) -> Non
     scheduled = [
         event["retry_phase"]
         for event in trace.events
-        if event.get("step") == "step-03-generate-sections"
+        if event.get("step") == "step-04-generate-sections"
         and event.get("event") == "step_retry_scheduled"
     ]
     assert scheduled == ["short_retry"]
@@ -401,13 +401,13 @@ def test_unknown_speaker_id_is_rejected(make_context) -> None:
     context.config.retry_strategy.fallback_enabled = False
     context.text_generation_provider = UnknownSpeakerProvider()
 
-    with pytest.raises(RuntimeError, match="Step failed: step-03-generate-sections"):
+    with pytest.raises(RuntimeError, match="Step failed: step-04-generate-sections"):
         StepExecutionEngine(build_minimal_steps()).run(context)
 
     failures = [
         event
         for event in trace.events
-        if event.get("step") == "step-03-generate-sections"
+        if event.get("step") == "step-04-generate-sections"
         and event.get("event") == "step_failed"
     ]
     assert len(failures) == 1
@@ -451,7 +451,7 @@ def test_invalid_existing_checkpoint_is_regenerated(make_context) -> None:
 
     output = engine.run(
         context,
-        options=ExecutionOptions(from_step="step-03-generate-sections"),
+        options=ExecutionOptions(from_step="step-04-generate-sections"),
     )
 
     assert len(output["scenario_sections"]) == 1
@@ -466,11 +466,11 @@ def test_section_fallback_fails_without_saving_synthetic_content(make_context) -
     provider = AlwaysFailProvider()
     context.text_generation_provider = provider
 
-    with pytest.raises(RuntimeError, match="Step failed: step-03-generate-sections"):
+    with pytest.raises(RuntimeError, match="Step failed: step-04-generate-sections"):
         StepExecutionEngine(build_minimal_steps()).run(context)
 
     assert provider.calls == 1
-    assert not (Path(context.artifacts_dir) / "step-03-generate-sections.json").exists()
+    assert not (Path(context.artifacts_dir) / "step-04-generate-sections.json").exists()
     assert not (Path(context.artifacts_dir) / "sections").exists()
     assert any(
         event.get("retry_phase") == "fallback"
@@ -521,14 +521,14 @@ def test_failed_run_keeps_completed_section_and_resume_only_generates_missing_on
     context.text_generation_provider = failing_provider
     engine = StepExecutionEngine(build_minimal_steps())
 
-    with pytest.raises(RuntimeError, match="Step failed: step-03-generate-sections"):
+    with pytest.raises(RuntimeError, match="Step failed: step-04-generate-sections"):
         engine.run(context)
 
     checkpoint_dir = Path(context.artifacts_dir) / "sections"
     assert (checkpoint_dir / "chapter-001-section-001.json").exists()
     assert not (checkpoint_dir / "chapter-001-section-002.json").exists()
     integrated_artifact = (
-        Path(context.artifacts_dir) / "step-03-generate-sections.json"
+        Path(context.artifacts_dir) / "step-04-generate-sections.json"
     )
     assert not integrated_artifact.exists()
 
@@ -536,7 +536,7 @@ def test_failed_run_keeps_completed_section_and_resume_only_generates_missing_on
     context.text_generation_provider = resumed_provider
     output = engine.run(
         context,
-        options=ExecutionOptions(from_step="step-03-generate-sections"),
+        options=ExecutionOptions(from_step="step-04-generate-sections"),
     )
 
     assert len(output["scenario_sections"]) == 2

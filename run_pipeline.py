@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pipeline.config import load_config
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
+from pipeline.image_generation import create_image_generation_provider
 from pipeline.state import RunStateStore
 from pipeline.steps import build_minimal_steps
 from pipeline.trace import TraceLogger
@@ -15,7 +16,7 @@ from pipeline.types import StepContext
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run minimal scenario pipeline")
+    parser = argparse.ArgumentParser(description="Run the scenario generation pipeline")
     parser.add_argument("--config", type=str, default="examples/pipeline.config.json")
     parser.add_argument("--input", type=str, default="examples/input.json")
     parser.add_argument("--run-id", type=str, default=None)
@@ -47,6 +48,13 @@ def main() -> None:
             config.text_generation.provider,
             timeout_seconds=config.text_generation.timeout_seconds,
             api_key_env=config.text_generation.api_key_env,
+        ),
+        image_generation_provider=create_image_generation_provider(
+            config.image_generation.provider,
+            quality=config.image_generation.quality,
+            output_format=config.image_generation.output_format,
+            timeout_seconds=config.image_generation.timeout_seconds,
+            api_key_env=config.image_generation.api_key_env,
         ),
     )
 

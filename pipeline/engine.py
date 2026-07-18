@@ -45,6 +45,7 @@ class StepExecutionEngine:
 
     def run(self, context: StepContext, options: ExecutionOptions | None = None) -> dict[str, object]:
         opts = options or ExecutionOptions()
+        context.force = opts.force
         step_names = {step.name for step in self.steps}
         if opts.from_step is not None and opts.from_step not in step_names:
             raise RuntimeError(f"Unknown from-step: {opts.from_step}")
@@ -191,6 +192,16 @@ class StepExecutionEngine:
                     )
                 consistency_data = {
                     **context.shared_data,
+                    "_image_generation_config": {
+                        "width": context.config.image_generation.width,
+                        "height": context.config.image_generation.height,
+                        "expression_width": (
+                            context.config.image_generation.expression_sheet_width // 4
+                        ),
+                        "expression_height": (
+                            context.config.image_generation.expression_sheet_height // 4
+                        ),
+                    },
                     "_scenario_body_generation_config": {
                         "min_characters": (
                             context.config.scenario_body_generation.min_characters
@@ -205,7 +216,11 @@ class StepExecutionEngine:
                         ),
                     },
                 }
-                self.consistency_checker.check(consistency_data, result.output)
+                self.consistency_checker.check(
+                    consistency_data,
+                    result.output,
+                    run_root=Path(context.artifacts_dir).parent,
+                )
                 context.trace_logger.log(
                     {
                         "run_id": context.run_id,

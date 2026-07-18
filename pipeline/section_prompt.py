@@ -19,7 +19,7 @@ class RenderedSectionPrompt:
 
 
 class ScenarioSectionPromptBuilder:
-    step_name = "step-03-generate-sections"
+    step_name = "step-04-generate-sections"
 
     def __init__(
         self,

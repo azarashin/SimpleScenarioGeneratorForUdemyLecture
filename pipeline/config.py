@@ -9,10 +9,16 @@ from typing import Any
 @dataclass(slots=True)
 class ImageGenerationConfig:
     provider: str = "mock"
-    model: str = "image-mock-v1"
+    model: str = "chat-gpt-image-2"
     width: int = 1024
     height: int = 1024
+    expression_sheet_width: int = 2048
+    expression_sheet_height: int = 2048
     style_preset: str = "anime"
+    quality: str = "high"
+    output_format: str = "png"
+    timeout_seconds: float = 120.0
+    api_key_env: str = "OPENAI_API_KEY"
 
 
 @dataclass(slots=True)
@@ -45,7 +51,7 @@ class TemperaturePolicyConfig:
     diversity_temperature: float = 0.7
     diversity_steps: tuple[str, ...] = (
         "step-02-generate-outline",
-        "step-03-generate-sections",
+        "step-04-generate-sections",
     )
 
 
@@ -127,7 +133,17 @@ def _to_default_dict() -> dict[str, Any]:
             "model": DEFAULT_CONFIG.image_generation.model,
             "width": DEFAULT_CONFIG.image_generation.width,
             "height": DEFAULT_CONFIG.image_generation.height,
+            "expression_sheet_width": (
+                DEFAULT_CONFIG.image_generation.expression_sheet_width
+            ),
+            "expression_sheet_height": (
+                DEFAULT_CONFIG.image_generation.expression_sheet_height
+            ),
             "style_preset": DEFAULT_CONFIG.image_generation.style_preset,
+            "quality": DEFAULT_CONFIG.image_generation.quality,
+            "output_format": DEFAULT_CONFIG.image_generation.output_format,
+            "timeout_seconds": DEFAULT_CONFIG.image_generation.timeout_seconds,
+            "api_key_env": DEFAULT_CONFIG.image_generation.api_key_env,
         },
     }
 
@@ -146,6 +162,35 @@ def load_config(config_path: str | None) -> AppConfig:
     body_conf = merged.get("scenario_body_generation", {})
     retry_conf = merged.get("retry_strategy", {})
     temperature_conf = merged.get("temperature_policy", {})
+    image_provider = str(image_conf.get("provider", "")).strip()
+    image_model = str(image_conf.get("model", "")).strip()
+    image_width = int(image_conf.get("width", 1024))
+    image_height = int(image_conf.get("height", 1024))
+    expression_sheet_width = int(image_conf.get("expression_sheet_width", 2048))
+    expression_sheet_height = int(image_conf.get("expression_sheet_height", 2048))
+    image_style = str(image_conf.get("style_preset", "")).strip()
+    image_quality = str(image_conf.get("quality", "high")).strip().casefold()
+    image_output_format = str(image_conf.get("output_format", "png")).strip().casefold()
+    image_timeout = float(image_conf.get("timeout_seconds", 120))
+    image_api_key_env = str(image_conf.get("api_key_env", "")).strip()
+    if not image_provider or not image_model or not image_style or not image_api_key_env:
+        raise ValueError(
+            "Image generation provider, model, style_preset, and api_key_env are required."
+        )
+    if (
+        image_width <= 0
+        or image_height <= 0
+        or expression_sheet_width <= 0
+        or expression_sheet_height <= 0
+        or image_timeout <= 0
+    ):
+        raise ValueError("Image generation dimensions and timeout must be greater than zero.")
+    if expression_sheet_width % 4 or expression_sheet_height % 4:
+        raise ValueError("Expression sheet dimensions must be divisible by 4.")
+    if image_quality not in {"low", "medium", "high", "auto"}:
+        raise ValueError("Image generation quality must be low, medium, high, or auto.")
+    if image_output_format not in {"png", "jpeg", "webp"}:
+        raise ValueError("Image generation output_format must be png, jpeg, or webp.")
     short_retries = int(retry_conf.get("short_retries", 1))
     prompt_revision_retries = int(retry_conf.get("prompt_revision_retries", 1))
     if short_retries < 0 or prompt_revision_retries < 0:
@@ -179,11 +224,17 @@ def load_config(config_path: str | None) -> AppConfig:
         state_file_name=str(merged["state_file_name"]),
         trace_file_name=str(merged["trace_file_name"]),
         image_generation=ImageGenerationConfig(
-            provider=str(image_conf.get("provider", DEFAULT_CONFIG.image_generation.provider)),
-            model=str(image_conf.get("model", DEFAULT_CONFIG.image_generation.model)),
-            width=int(image_conf.get("width", DEFAULT_CONFIG.image_generation.width)),
-            height=int(image_conf.get("height", DEFAULT_CONFIG.image_generation.height)),
-            style_preset=str(image_conf.get("style_preset", DEFAULT_CONFIG.image_generation.style_preset)),
+            provider=image_provider,
+            model=image_model,
+            width=image_width,
+            height=image_height,
+            expression_sheet_width=expression_sheet_width,
+            expression_sheet_height=expression_sheet_height,
+            style_preset=image_style,
+            quality=image_quality,
+            output_format=image_output_format,
+            timeout_seconds=image_timeout,
+            api_key_env=image_api_key_env,
         ),
         text_generation=TextGenerationConfig(
             provider=text_provider,

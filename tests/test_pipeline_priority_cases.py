@@ -259,6 +259,25 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     assert conf.temperature_policy == TemperaturePolicyConfig()
     assert conf.image_generation.provider == "stub"
     assert conf.image_generation.model == ImageGenerationConfig().model
+    assert conf.image_generation.expression_sheet_width == 2048
+    assert conf.image_generation.expression_sheet_height == 2048
+    assert conf.image_generation.quality == "high"
+    assert conf.image_generation.output_format == "png"
+    assert conf.image_generation.timeout_seconds == 120
+    assert conf.image_generation.api_key_env == "OPENAI_API_KEY"
+
+
+def test_p1_config_rejects_expression_sheet_dimensions_not_divisible_by_four(
+    tmp_path: Path,
+) -> None:
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps({"image_generation": {"expression_sheet_width": 2047}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="divisible by 4"):
+        load_config(str(cfg_path))
 
 
 def test_p1_cli_like_integration_creates_core_outputs(make_context) -> None:
@@ -312,6 +331,7 @@ def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
 
     assert "character_profiles" in output
     assert "scenario_outline" in output
+    assert "character_image_assets" in output
     assert "scenario_sections" in output
 
     outline_sections = [
@@ -446,8 +466,13 @@ def test_temperature_policy_limits_diversity_to_selected_steps(make_context) -> 
     assert succeeded["step-01-generate-character-profiles"]["temperature_mode"] == "deterministic"
     assert succeeded["step-02-generate-outline"]["temperature"] == 0.7
     assert succeeded["step-02-generate-outline"]["temperature_mode"] == "diversity"
-    assert succeeded["step-03-generate-sections"]["temperature"] == 0.7
-    assert succeeded["step-03-generate-sections"]["temperature_mode"] == "diversity"
+    assert succeeded["step-03-generate-character-images"]["temperature"] == 0.2
+    assert (
+        succeeded["step-03-generate-character-images"]["temperature_mode"]
+        == "deterministic"
+    )
+    assert succeeded["step-04-generate-sections"]["temperature"] == 0.7
+    assert succeeded["step-04-generate-sections"]["temperature_mode"] == "diversity"
 
 
 def test_temperature_policy_rejects_step_override(make_context) -> None:
@@ -478,18 +503,20 @@ def test_pipeline_trace_records_prompt_version_and_hash(make_context) -> None:
     context.config.prompt_versions = {
         "step-01-generate-character-profiles": "v1",
         "step-02-generate-outline": "v1",
-        "step-03-generate-sections": "v2",
+        "step-03-generate-character-images": "v1",
+        "step-04-generate-sections": "v2",
     }
 
     StepExecutionEngine(build_minimal_steps()).run(context)
 
     succeeded = [event for event in trace.events if event.get("event") == "step_succeeded"]
-    assert len(succeeded) == 3
+    assert len(succeeded) == 4
     versions = {event["step"]: event["prompt_version"] for event in succeeded}
     assert versions == {
         "step-01-generate-character-profiles": "v1",
         "step-02-generate-outline": "v1",
-        "step-03-generate-sections": "v2",
+        "step-03-generate-character-images": "v1",
+        "step-04-generate-sections": "v2",
     }
     assert all(len(event["prompt_hash"]) == 64 for event in succeeded)
 

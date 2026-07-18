@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.config import AppConfig, ImageGenerationConfig, TextGenerationConfig
+from pipeline.image_generation import create_image_generation_provider
 from pipeline.state import RunStateStore
 from pipeline.trace import TraceLogger
 from pipeline.text_generation import create_text_generation_provider
@@ -30,7 +31,10 @@ def base_config(tmp_path: Path) -> AppConfig:
         artifacts_dir_name="artifacts",
         state_file_name="run-state.json",
         trace_file_name="trace.jsonl",
-        image_generation=ImageGenerationConfig(),
+        image_generation=ImageGenerationConfig(
+            expression_sheet_width=1024,
+            expression_sheet_height=1024,
+        ),
         text_generation=TextGenerationConfig(model="test-model"),
     )
 
@@ -77,6 +81,7 @@ def make_context(tmp_path: Path, base_config: AppConfig, input_payload: dict[str
             trace_logger=trace,
             shared_data=shared_data,
             text_generation_provider=create_text_generation_provider("mock"),
+            image_generation_provider=create_image_generation_provider("mock"),
         )
         return context, trace
 

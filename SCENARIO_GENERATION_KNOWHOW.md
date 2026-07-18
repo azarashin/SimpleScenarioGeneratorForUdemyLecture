@@ -1,4 +1,4 @@
-# シナリオ生成の改善ノウハウ
+# シナリオ・画像生成の改善ノウハウ
 
 ## 今回、分量が改善した理由
 
@@ -115,10 +115,114 @@ output/<run-id>/artifacts/sections/chapter-NNN-section-NNN.rejected.json
 python run_pipeline.py `
   --config examples/pipeline.openai.config.json `
   --run-id openai-scenario-001 `
-  --from-step step-03-generate-sections `
+  --from-step step-04-generate-sections `
   --force
 ```
 
 途中で失敗しても、同じプロンプトハッシュで検証済みのチェックポイントは再利用されます。
 これにより、成功済みセクションのAPI生成を繰り返さず、失敗したセクションから再開できます。
 
+---
+
+## キャラクター画像生成のノウハウ
+
+### 表情ごとの個別生成より4×4表情シートを優先する
+
+当初は、基準画像を生成した後に各表情を1枚ずつAPIで生成していました。この方式には次の問題があります。
+
+- 表情の数だけAPI呼び出し、待ち時間、料金が増える
+- 呼び出しごとに顔、髪型、衣装、構図が変化しやすい
+- 途中失敗時に多数のAPIリクエストを再開管理する必要がある
+
+現在はキャラクターごとに、基準画像1枚と4列×4行の表情シート1枚を生成します。API呼び出しは合計2回で、表情シートから16枚をローカルで切り出します。
+
+```text
+基準画像を生成
+    ↓ 参照画像として使用
+4×4表情シートを生成
+    ↓ 固定座標で16等分
+表情別画像を保存
+```
+
+固定順序は次のとおりです。
+
+| 行 | 左から右への表情 |
+| --- | --- |
+| 1 | neutral, smile, serious, thinking |
+| 2 | surprised, worried, confused, angry |
+| 3 | sad, relieved, embarrassed, nervous |
+| 4 | confident, doubtful, shocked, determined |
+
+プロンプトでは同一人物、同一衣装、同一アングル、同一サイズを強く指定し、文字、ラベル、罫線、背景装飾を禁止します。固定座標で切り出すため、人物がセルをまたがないことと、セル内に余白を確保することも重要です。
+
+既定の表情シートは2048×2048で、切り出し後は1枚512×512です。シートの幅と高さはそれぞれ4で割り切れる必要があります。
+
+### 高品質な画像生成では短いタイムアウトを避ける
+
+`gpt-image-2`で`quality: high`を使用すると、画像生成が120秒を超える場合があります。正常に処理中でもタイムアウトする可能性があったため、OpenAI用設定では300秒にしています。
+
+```json
+{
+  "image_generation": {
+    "quality": "high",
+    "timeout_seconds": 300
+  }
+}
+```
+
+タイムアウト値を大きくすれば必ず成功するわけではありません。API混雑、ネットワーク、VPN、プロキシ、ファイアウォールも確認します。動作確認を優先する場合は、一時的に`quality`を`medium`へ下げる方法もあります。
+
+### SDKとパイプラインの多重リトライに注意する
+
+OpenAI SDKはAPI呼び出しを内部でリトライする場合があります。さらにパイプラインも`short_retry`、`prompt_revision`、`fallback`を実行するため、両方が有効だと終了まで数十分かかる可能性があります。
+
+調査時は`trace.jsonl`の次のイベントを確認します。
+
+- `step_started`: 現在の試行番号とリトライ段階
+- `step_failed`: 失敗理由と1試行の所要時間
+- `step_retry_scheduled`: 次に予定されたリトライ段階
+- `image_generated`: APIまたはmockによる画像生成完了
+- `image_checkpoint_loaded`: APIを呼ばず既存画像を再利用
+
+短時間で原因を確認したい場合は、検証用設定でパイプライン側のリトライを一時的に減らします。
+
+```json
+{
+  "retry_strategy": {
+    "short_retries": 0,
+    "prompt_revision_retries": 0,
+    "fallback_enabled": false
+  }
+}
+```
+
+### 生成画像と切り出し画像の両方にチェックポイントを持たせる
+
+基準画像、4×4表情シート、切り出した16枚のそれぞれにチェックポイントを保存します。切り出し画像だけが欠損・破損した場合はAPIを呼ばず、保存済み表情シートからその画像だけを復元できます。表情シートが欠損した場合も、基準画像を再利用して表情シートから再開できます。
+
+```powershell
+python run_pipeline.py `
+  --config examples/pipeline.openai.config.json `
+  --run-id openai-scenario-001 `
+  --from-step step-03-generate-character-images
+```
+
+実行中のPythonプロセスが残っている状態で同じrun IDを二重実行しないでください。チェックポイントやrun-stateを同時更新する可能性があります。
+
+### APIキーの環境変数名と実値を区別する
+
+画像生成設定の`api_key_env`はAPIキー自体ではなく、キーを格納した環境変数名です。既定値は`OPENAI_API_KEY`です。
+
+```json
+"api_key_env": "OPENAI_API_KEY"
+```
+
+```powershell
+$env:OPENAI_API_KEY = "your-api-key"
+```
+
+設定ファイルに`your-api-key`のようなプレースホルダーを実キーとして書くと、401 `invalid_api_key`になります。テキストと画像で同じOpenAIプロジェクトと権限を使う場合、キーを分ける必要はありません。権限分離や利用量管理が必要な場合に別キーを検討します。
+
+### 旧runとの互換性に注意する
+
+4×4方式では`available_expressions`を固定16表情として扱います。旧方式の`neutral`, `happy`, `sad`などを持つrunは、画像ステップだけをそのまま再開できません。新しいrun IDを使用して`step-01-generate-character-profiles`から実行してください。

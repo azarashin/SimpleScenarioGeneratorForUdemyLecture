@@ -26,6 +26,8 @@ class StepContext:
     trace_logger: "TraceLogger"
     shared_data: dict[str, Any]
     text_generation_provider: "TextGenerationProvider"
+    image_generation_provider: "ImageGenerationProvider"
+    force: bool = False
 
 
 class Step:
@@ -55,3 +57,4 @@ from .config import AppConfig  # noqa: E402
 from .state import RunStateStore  # noqa: E402
 from .trace import TraceLogger  # noqa: E402
 from .text_generation import TextGenerationProvider  # noqa: E402
+from .image_generation import ImageGenerationProvider  # noqa: E402
