@@ -8,7 +8,7 @@
 
 - `step-01-generate-character-profiles`: 登場人物プロフィール生成
 - `step-02-generate-outline`: シナリオアウトライン生成
-- `step-03-generate-character-images`: キャラクター画像生成（追加予定）
+- `step-03-generate-character-images`: キャラクター基本画像・表情差分生成
 - `step-04-generate-sections`: 章・節本文生成
 
 シナリオ本文の生成契約は `SCENARIO_BODY_SPEC.md`、会話量を増やすための考え方と調整方法は
@@ -31,8 +31,8 @@
 }
 ```
 
-実画像を生成するプロバイダーは未実装です。キャラクター画像生成ステップを追加する際は、
-同じインターフェースへ実API用プロバイダーを実装します。
+実画像を生成するプロバイダーは未実装です。現在の画像生成ステップは `mock` により動作し、
+実APIを利用する際は同じインターフェースへプロバイダーを追加します。
 
 ## テキスト生成設定
 
@@ -256,6 +256,7 @@ python compare_prompt_runs.py output/run-baseline output/run-candidate
 
 - `artifacts/*.json`: 各ステップの成果物
 - `artifacts/sections/*.json`: セクションごとのチェックポイント
+- `assets/characters/<character-id>/*`: キャラクター基本画像と表情差分
 - `run-state.json`: ステップの実行状態
 - `trace.jsonl`: 詳細な実行トレース
 - `summary.json`: 完了したパイプラインの統合結果

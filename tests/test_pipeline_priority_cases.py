@@ -312,6 +312,7 @@ def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
 
     assert "character_profiles" in output
     assert "scenario_outline" in output
+    assert "character_image_assets" in output
     assert "scenario_sections" in output
 
     outline_sections = [
@@ -446,6 +447,11 @@ def test_temperature_policy_limits_diversity_to_selected_steps(make_context) -> 
     assert succeeded["step-01-generate-character-profiles"]["temperature_mode"] == "deterministic"
     assert succeeded["step-02-generate-outline"]["temperature"] == 0.7
     assert succeeded["step-02-generate-outline"]["temperature_mode"] == "diversity"
+    assert succeeded["step-03-generate-character-images"]["temperature"] == 0.2
+    assert (
+        succeeded["step-03-generate-character-images"]["temperature_mode"]
+        == "deterministic"
+    )
     assert succeeded["step-04-generate-sections"]["temperature"] == 0.7
     assert succeeded["step-04-generate-sections"]["temperature_mode"] == "diversity"
 
@@ -478,17 +484,19 @@ def test_pipeline_trace_records_prompt_version_and_hash(make_context) -> None:
     context.config.prompt_versions = {
         "step-01-generate-character-profiles": "v1",
         "step-02-generate-outline": "v1",
+        "step-03-generate-character-images": "v1",
         "step-04-generate-sections": "v2",
     }
 
     StepExecutionEngine(build_minimal_steps()).run(context)
 
     succeeded = [event for event in trace.events if event.get("event") == "step_succeeded"]
-    assert len(succeeded) == 3
+    assert len(succeeded) == 4
     versions = {event["step"]: event["prompt_version"] for event in succeeded}
     assert versions == {
         "step-01-generate-character-profiles": "v1",
         "step-02-generate-outline": "v1",
+        "step-03-generate-character-images": "v1",
         "step-04-generate-sections": "v2",
     }
     assert all(len(event["prompt_hash"]) == 64 for event in succeeded)

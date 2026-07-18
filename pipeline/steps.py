@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 
+from .character_image_prompt import CharacterImagePromptBuilder
 from .errors import ScenarioGenerationFallbackError
 from .prompts import resolve_step_prompt
 from .schema_validation import StepSchemaValidator
@@ -122,6 +125,125 @@ class GenerateOutlineStep(Step):
             input_tokens=180,
             output_tokens=360,
         )
+
+
+class GenerateCharacterImagesStep(Step):
+    name = "step-03-generate-character-images"
+    schema_name = "step-03-generate-character-images.schema.json"
+    input_keys = ("character_profiles",)
+
+    def run(self, context: StepContext) -> StepResult:
+        profiles = context.shared_data["character_profiles"]
+        config = context.config.image_generation
+        requested_version = context.config.prompt_versions.get(self.name)
+        prompt_builder = CharacterImagePromptBuilder()
+        run_root = Path(context.artifacts_dir).parent
+        assets: list[dict[str, Any]] = []
+        rendered_prompts = []
+
+        for profile in profiles:
+            character_id = profile["character_id"]
+            character_dir = run_root / "assets" / "characters" / character_id
+            base_prompt = prompt_builder.build_base(
+                character_profile=profile,
+                width=config.width,
+                height=config.height,
+                style_preset=config.style_preset,
+                version=requested_version,
+            )
+            rendered_prompts.append(base_prompt)
+            base_response = context.image_generation_provider.generate_image(
+                prompt=base_prompt.text,
+                model=config.model,
+                width=config.width,
+                height=config.height,
+                style_preset=config.style_preset,
+            )
+            extension = self._extension_for(base_response.mime_type)
+            base_path = character_dir / f"base{extension}"
+            self._write_image(base_path, base_response.image_bytes)
+            base_relative = base_path.relative_to(run_root).as_posix()
+            expression_images = {"neutral": base_relative}
+
+            for expression in profile["emotion_model"]["available_expressions"]:
+                if expression == "neutral":
+                    continue
+                expression_prompt = prompt_builder.build_expression(
+                    character_profile=profile,
+                    expression=expression,
+                    width=config.width,
+                    height=config.height,
+                    style_preset=config.style_preset,
+                    version=requested_version,
+                )
+                rendered_prompts.append(expression_prompt)
+                response = context.image_generation_provider.generate_image(
+                    prompt=expression_prompt.text,
+                    model=config.model,
+                    width=config.width,
+                    height=config.height,
+                    style_preset=config.style_preset,
+                )
+                image_path = character_dir / (
+                    f"{self._expression_filename(expression)}"
+                    f"{self._extension_for(response.mime_type)}"
+                )
+                self._write_image(image_path, response.image_bytes)
+                expression_images[expression] = image_path.relative_to(run_root).as_posix()
+
+            assets.append(
+                {
+                    "character_id": character_id,
+                    "base_image_path": base_relative,
+                    "expression_images": expression_images,
+                }
+            )
+
+        prompt_hash = hashlib.sha256(
+            "\n".join(prompt.rendered_hash for prompt in rendered_prompts).encode("utf-8")
+        ).hexdigest()
+        first_prompt = rendered_prompts[0]
+        return StepResult(
+            output={"character_image_assets": assets},
+            prompt=first_prompt.text,
+            prompt_version=first_prompt.version,
+            prompt_hash=prompt_hash,
+            model=config.model,
+            metadata={
+                "image_count": len(rendered_prompts),
+                "character_count": len(assets),
+                "assets_root": "assets/characters",
+            },
+        )
+
+    @staticmethod
+    def _write_image(path: Path, image_bytes: bytes) -> None:
+        if not image_bytes:
+            raise ValueError(f"Image provider returned empty content for {path.name}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+        temporary_path.write_bytes(image_bytes)
+        temporary_path.replace(path)
+
+    @staticmethod
+    def _extension_for(mime_type: str) -> str:
+        extensions = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/webp": ".webp",
+        }
+        try:
+            return extensions[mime_type.casefold()]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported generated image MIME type: {mime_type}") from exc
+
+    @staticmethod
+    def _expression_filename(expression: str) -> str:
+        normalized = re.sub(r"[^A-Za-z0-9_-]+", "-", expression).strip("-_").lower()
+        if normalized:
+            return normalized
+        digest = hashlib.sha256(expression.encode("utf-8")).hexdigest()[:12]
+        return f"expression-{digest}"
 
 
 class GenerateSectionsStep(Step):
@@ -469,5 +591,6 @@ def build_minimal_steps() -> list[Step]:
     return [
         GenerateCharacterProfilesStep(),
         GenerateOutlineStep(),
+        GenerateCharacterImagesStep(),
         GenerateSectionsStep(),
     ]
