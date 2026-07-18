@@ -8,7 +8,8 @@
 
 - `step-01-generate-character-profiles`: 登場人物プロフィール生成
 - `step-02-generate-outline`: シナリオアウトライン生成
-- `step-03-generate-sections`: 章・節本文生成
+- `step-03-generate-character-images`: キャラクター画像生成（追加予定）
+- `step-04-generate-sections`: 章・節本文生成
 
 シナリオ本文の生成契約は `SCENARIO_BODY_SPEC.md`、会話量を増やすための考え方と調整方法は
 `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。
@@ -103,7 +104,7 @@ python run_pipeline.py --run-id run-20260718-101010
 python run_pipeline.py `
   --config examples/pipeline.openai.config.json `
   --run-id openai-scenario-001 `
-  --from-step step-03-generate-sections
+  --from-step step-04-generate-sections
 ```
 
 ## 強制再生成
@@ -112,7 +113,7 @@ python run_pipeline.py `
 python run_pipeline.py `
   --config examples/pipeline.openai.config.json `
   --run-id openai-scenario-001 `
-  --from-step step-03-generate-sections `
+  --from-step step-04-generate-sections `
   --force
 ```
 
@@ -127,7 +128,7 @@ output/<run-id>/artifacts/sections/
 ```
 
 再試行や再開時には、有効なチェックポイントを読み込み、最初の未生成または無効なセクションから再開します。
-統合成果物 `step-03-generate-sections.json` は、全セクションが成功した後にだけ保存されます。
+統合成果物 `step-04-generate-sections.json` は、全セクションが成功した後にだけ保存されます。
 失敗した実行でも、成功済みのセクションチェックポイントは保持されます。
 
 各チェックポイントの `state_after` には次の情報が保存され、次のセクションへ渡されます。
@@ -196,7 +197,7 @@ output/<run-id>/artifacts/sections/chapter-NNN-section-NNN.rejected.json
     "diversity_temperature": 0.7,
     "diversity_steps": [
       "step-02-generate-outline",
-      "step-03-generate-sections"
+      "step-04-generate-sections"
     ]
   }
 }
@@ -215,7 +216,7 @@ output/<run-id>/artifacts/sections/chapter-NNN-section-NNN.rejected.json
   "prompt_versions": {
     "step-01-generate-character-profiles": "v1",
     "step-02-generate-outline": "v1",
-    "step-03-generate-sections": "v2"
+    "step-04-generate-sections": "v2"
   }
 }
 ```

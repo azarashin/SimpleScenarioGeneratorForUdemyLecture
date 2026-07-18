@@ -17,13 +17,13 @@
         "diversity_temperature": 0.7,
         "diversity_steps": [
             "step-02-generate-outline",
-            "step-03-generate-sections"
+            "step-04-generate-sections"
         ]
     },
     "prompt_versions": {
         "step-01-generate-character-profiles": "v1",
         "step-02-generate-outline": "v1",
-        "step-03-generate-sections": "v2"
+        "step-04-generate-sections": "v2"
     },
     "retry_strategy": {
         "short_retries": 1,

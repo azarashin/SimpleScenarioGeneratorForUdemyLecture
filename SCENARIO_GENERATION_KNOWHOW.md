@@ -115,10 +115,9 @@ output/<run-id>/artifacts/sections/chapter-NNN-section-NNN.rejected.json
 python run_pipeline.py `
   --config examples/pipeline.openai.config.json `
   --run-id openai-scenario-001 `
-  --from-step step-03-generate-sections `
+  --from-step step-04-generate-sections `
   --force
 ```
 
 途中で失敗しても、同じプロンプトハッシュで検証済みのチェックポイントは再利用されます。
 これにより、成功済みセクションのAPI生成を繰り返さず、失敗したセクションから再開できます。
-

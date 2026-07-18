@@ -125,7 +125,7 @@ class GenerateOutlineStep(Step):
 
 
 class GenerateSectionsStep(Step):
-    name = "step-03-generate-sections"
+    name = "step-04-generate-sections"
     schema_name = "step-04-generate-sections.schema.json"
     input_keys = ("character_profiles", "scenario_outline")
 

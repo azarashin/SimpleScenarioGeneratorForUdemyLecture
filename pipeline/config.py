@@ -45,7 +45,7 @@ class TemperaturePolicyConfig:
     diversity_temperature: float = 0.7
     diversity_steps: tuple[str, ...] = (
         "step-02-generate-outline",
-        "step-03-generate-sections",
+        "step-04-generate-sections",
     )
 
 
