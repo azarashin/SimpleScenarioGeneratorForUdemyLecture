@@ -27,6 +27,7 @@ class StepContext:
     shared_data: dict[str, Any]
     text_generation_provider: "TextGenerationProvider"
     image_generation_provider: "ImageGenerationProvider"
+    force: bool = False
 
 
 class Step:

@@ -45,6 +45,7 @@ class StepExecutionEngine:
 
     def run(self, context: StepContext, options: ExecutionOptions | None = None) -> dict[str, object]:
         opts = options or ExecutionOptions()
+        context.force = opts.force
         step_names = {step.name for step in self.steps}
         if opts.from_step is not None and opts.from_step not in step_names:
             raise RuntimeError(f"Unknown from-step: {opts.from_step}")

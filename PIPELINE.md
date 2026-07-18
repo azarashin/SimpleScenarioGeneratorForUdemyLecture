@@ -38,6 +38,10 @@
 PNG・JPEG・WebP形式、拡張子、画像寸法を検証します。不完全または破損した画像がある場合、
 `step-03-generate-character-images.json` は保存されません。
 
+各画像の生成完了時に `artifacts/images/<character-id>/<image-name>.json` へチェックポイントを
+保存します。再試行・再開時は、生成条件ハッシュと画像SHA-256が一致する画像を再利用し、欠落、
+改変、設定変更のある画像だけを再生成します。`--force` 指定時は全画像を再生成します。
+
 ## テキスト生成設定
 
 テキスト生成は `TextGenerationProvider` を経由します。ローカル実行とテストでは決定的なモック実装を利用できます。
@@ -260,6 +264,7 @@ python compare_prompt_runs.py output/run-baseline output/run-candidate
 
 - `artifacts/*.json`: 各ステップの成果物
 - `artifacts/sections/*.json`: セクションごとのチェックポイント
+- `artifacts/images/**/*.json`: 画像ごとのチェックポイント
 - `assets/characters/<character-id>/*`: キャラクター基本画像と表情差分
 - `run-state.json`: ステップの実行状態
 - `trace.jsonl`: 詳細な実行トレース

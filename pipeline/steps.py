@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from .character_image_prompt import CharacterImagePromptBuilder
+from .consistency import PipelineConsistencyChecker
 from .errors import ScenarioGenerationFallbackError
 from .prompts import resolve_step_prompt
 from .schema_validation import StepSchemaValidator
@@ -138,6 +139,7 @@ class GenerateCharacterImagesStep(Step):
         requested_version = context.config.prompt_versions.get(self.name)
         prompt_builder = CharacterImagePromptBuilder()
         run_root = Path(context.artifacts_dir).parent
+        checkpoint_root = Path(context.artifacts_dir) / "images"
         assets: list[dict[str, Any]] = []
         rendered_prompts = []
 
@@ -152,17 +154,16 @@ class GenerateCharacterImagesStep(Step):
                 version=requested_version,
             )
             rendered_prompts.append(base_prompt)
-            base_response = context.image_generation_provider.generate_image(
-                prompt=base_prompt.text,
-                model=config.model,
-                width=config.width,
-                height=config.height,
-                style_preset=config.style_preset,
+            base_relative = self._resolve_image(
+                context=context,
+                prompt=base_prompt,
+                label="base",
+                image_stem="base",
+                character_id=character_id,
+                character_dir=character_dir,
+                checkpoint_path=checkpoint_root / character_id / "base.json",
+                run_root=run_root,
             )
-            extension = self._extension_for(base_response.mime_type)
-            base_path = character_dir / f"base{extension}"
-            self._write_image(base_path, base_response.image_bytes)
-            base_relative = base_path.relative_to(run_root).as_posix()
             expression_images = {"neutral": base_relative}
 
             for expression in profile["emotion_model"]["available_expressions"]:
@@ -177,19 +178,19 @@ class GenerateCharacterImagesStep(Step):
                     version=requested_version,
                 )
                 rendered_prompts.append(expression_prompt)
-                response = context.image_generation_provider.generate_image(
-                    prompt=expression_prompt.text,
-                    model=config.model,
-                    width=config.width,
-                    height=config.height,
-                    style_preset=config.style_preset,
+                image_stem = self._expression_filename(expression)
+                expression_images[expression] = self._resolve_image(
+                    context=context,
+                    prompt=expression_prompt,
+                    label=expression,
+                    image_stem=image_stem,
+                    character_id=character_id,
+                    character_dir=character_dir,
+                    checkpoint_path=checkpoint_root
+                    / character_id
+                    / f"{image_stem}.json",
+                    run_root=run_root,
                 )
-                image_path = character_dir / (
-                    f"{self._expression_filename(expression)}"
-                    f"{self._extension_for(response.mime_type)}"
-                )
-                self._write_image(image_path, response.image_bytes)
-                expression_images[expression] = image_path.relative_to(run_root).as_posix()
 
             assets.append(
                 {
@@ -213,8 +214,208 @@ class GenerateCharacterImagesStep(Step):
                 "image_count": len(rendered_prompts),
                 "character_count": len(assets),
                 "assets_root": "assets/characters",
+                "checkpoint_root": "artifacts/images",
             },
         )
+
+    def _resolve_image(
+        self,
+        *,
+        context: StepContext,
+        prompt: Any,
+        label: str,
+        image_stem: str,
+        character_id: str,
+        character_dir: Path,
+        checkpoint_path: Path,
+        run_root: Path,
+    ) -> str:
+        config = context.config.image_generation
+        request_hash = self._request_hash(
+            rendered_hash=prompt.rendered_hash,
+            provider=config.provider,
+            model=config.model,
+            width=config.width,
+            height=config.height,
+            style_preset=config.style_preset,
+            label=label,
+        )
+        if not context.force:
+            checkpoint_image = self._load_image_checkpoint(
+                checkpoint_path=checkpoint_path,
+                expected_request_hash=request_hash,
+                run_root=run_root,
+                expected_width=config.width,
+                expected_height=config.height,
+            )
+            if checkpoint_image is not None:
+                context.trace_logger.log(
+                    {
+                        "run_id": context.run_id,
+                        "step": self.name,
+                        "event": "image_checkpoint_loaded",
+                        "character_id": character_id,
+                        "expression": label,
+                        "image_path": checkpoint_image,
+                    }
+                )
+                return checkpoint_image
+
+        response = context.image_generation_provider.generate_image(
+            prompt=prompt.text,
+            model=config.model,
+            width=config.width,
+            height=config.height,
+            style_preset=config.style_preset,
+        )
+        self._validate_image_content(
+            response.image_bytes,
+            mime_type=response.mime_type,
+            expected_width=config.width,
+            expected_height=config.height,
+        )
+        image_path = character_dir / (
+            f"{image_stem}{self._extension_for(response.mime_type)}"
+        )
+        self._write_image(image_path, response.image_bytes)
+        relative_path = image_path.relative_to(run_root).as_posix()
+        self._write_image_checkpoint(
+            checkpoint_path=checkpoint_path,
+            request_hash=request_hash,
+            image_hash=hashlib.sha256(response.image_bytes).hexdigest(),
+            image_path=relative_path,
+            mime_type=response.mime_type,
+            model=response.model,
+        )
+        context.trace_logger.log(
+            {
+                "run_id": context.run_id,
+                "step": self.name,
+                "event": "image_generated",
+                "character_id": character_id,
+                "expression": label,
+                "image_path": relative_path,
+                "checkpoint_path": str(checkpoint_path),
+            }
+        )
+        return relative_path
+
+    @staticmethod
+    def _request_hash(
+        *,
+        rendered_hash: str,
+        provider: str,
+        model: str,
+        width: int,
+        height: int,
+        style_preset: str,
+        label: str,
+    ) -> str:
+        payload = json.dumps(
+            {
+                "rendered_hash": rendered_hash,
+                "provider": provider,
+                "model": model,
+                "width": width,
+                "height": height,
+                "style_preset": style_preset,
+                "label": label,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _load_image_checkpoint(
+        *,
+        checkpoint_path: Path,
+        expected_request_hash: str,
+        run_root: Path,
+        expected_width: int,
+        expected_height: int,
+    ) -> str | None:
+        if not checkpoint_path.is_file():
+            return None
+        try:
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            if checkpoint["request_hash"] != expected_request_hash:
+                return None
+            relative_path = checkpoint["image_path"]
+            if not isinstance(relative_path, str):
+                return None
+            image_path = (run_root / relative_path).resolve()
+            image_path.relative_to(run_root.resolve())
+            image_bytes = image_path.read_bytes()
+            if not image_bytes:
+                return None
+            if hashlib.sha256(image_bytes).hexdigest() != checkpoint["image_hash"]:
+                return None
+            GenerateCharacterImagesStep._validate_image_content(
+                image_bytes,
+                mime_type=checkpoint["mime_type"],
+                expected_width=expected_width,
+                expected_height=expected_height,
+            )
+        except (KeyError, OSError, ValueError, json.JSONDecodeError):
+            return None
+        return relative_path
+
+    @staticmethod
+    def _validate_image_content(
+        image_bytes: bytes,
+        *,
+        mime_type: str,
+        expected_width: int,
+        expected_height: int,
+    ) -> None:
+        image_format, width, height = PipelineConsistencyChecker._image_info(
+            image_bytes
+        )
+        expected_format = {
+            "image/png": "png",
+            "image/jpeg": "jpeg",
+            "image/webp": "webp",
+        }.get(mime_type.casefold())
+        if expected_format != image_format:
+            raise ValueError(
+                f"Generated image MIME type {mime_type!r} does not match "
+                f"its {image_format} content"
+            )
+        if (width, height) != (expected_width, expected_height):
+            raise ValueError(
+                "Generated image dimensions differ from config: "
+                f"{width}x{height} != {expected_width}x{expected_height}"
+            )
+
+    @staticmethod
+    def _write_image_checkpoint(
+        *,
+        checkpoint_path: Path,
+        request_hash: str,
+        image_hash: str,
+        image_path: str,
+        mime_type: str,
+        model: str,
+    ) -> None:
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = checkpoint_path.with_suffix(".tmp")
+        temporary_path.write_text(
+            json.dumps(
+                {
+                    "request_hash": request_hash,
+                    "image_hash": image_hash,
+                    "image_path": image_path,
+                    "mime_type": mime_type,
+                    "model": model,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temporary_path.replace(checkpoint_path)
 
     @staticmethod
     def _write_image(path: Path, image_bytes: bytes) -> None:
