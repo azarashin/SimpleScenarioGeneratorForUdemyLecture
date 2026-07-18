@@ -27,6 +27,8 @@ class TextGenerationConfig:
 class ScenarioBodyGenerationConfig:
     min_characters: int = 800
     max_characters: int = 1600
+    min_dialogue_blocks: int = 20
+    max_dialogue_blocks: int = 40
     require_event_mentions: bool = True
 
 
@@ -114,6 +116,8 @@ def _to_default_dict() -> dict[str, Any]:
         "scenario_body_generation": {
             "min_characters": DEFAULT_CONFIG.scenario_body_generation.min_characters,
             "max_characters": DEFAULT_CONFIG.scenario_body_generation.max_characters,
+            "min_dialogue_blocks": DEFAULT_CONFIG.scenario_body_generation.min_dialogue_blocks,
+            "max_dialogue_blocks": DEFAULT_CONFIG.scenario_body_generation.max_dialogue_blocks,
             "require_event_mentions": (
                 DEFAULT_CONFIG.scenario_body_generation.require_event_mentions
             ),
@@ -163,8 +167,12 @@ def load_config(config_path: str | None) -> AppConfig:
         raise ValueError("Text generation timeout_seconds must be greater than zero.")
     min_characters = int(body_conf.get("min_characters", 800))
     max_characters = int(body_conf.get("max_characters", 1600))
+    min_dialogue_blocks = int(body_conf.get("min_dialogue_blocks", 20))
+    max_dialogue_blocks = int(body_conf.get("max_dialogue_blocks", 40))
     if min_characters <= 0 or max_characters < min_characters:
         raise ValueError("Scenario body character limits are invalid.")
+    if min_dialogue_blocks <= 0 or max_dialogue_blocks < min_dialogue_blocks:
+        raise ValueError("Scenario body dialogue block limits are invalid.")
     return AppConfig(
         output_root=str(merged["output_root"]),
         artifacts_dir_name=str(merged["artifacts_dir_name"]),
@@ -186,6 +194,8 @@ def load_config(config_path: str | None) -> AppConfig:
         scenario_body_generation=ScenarioBodyGenerationConfig(
             min_characters=min_characters,
             max_characters=max_characters,
+            min_dialogue_blocks=min_dialogue_blocks,
+            max_dialogue_blocks=max_dialogue_blocks,
             require_event_mentions=bool(body_conf.get("require_event_mentions", True)),
         ),
         retry_strategy=RetryStrategyConfig(

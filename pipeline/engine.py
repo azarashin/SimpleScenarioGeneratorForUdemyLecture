@@ -106,7 +106,23 @@ class StepExecutionEngine:
 
             success = self._run_single_step(step=step, context=context)
             if not success:
-                raise RuntimeError(f"Step failed: {step.name}")
+                failed_state = context.state_store.get_step(step.name)
+                reason = (
+                    failed_state.error_reason
+                    if failed_state and failed_state.error_reason
+                    else "No failure reason was recorded."
+                )
+                attempts = failed_state.attempts if failed_state else 0
+                phase = failed_state.retry_phase if failed_state else "unknown"
+                trace_path = getattr(context.trace_logger, "trace_path", "unknown")
+                raise RuntimeError(
+                    f"Step failed: {step.name}\n"
+                    f"Reason: {reason}\n"
+                    f"Attempts: {attempts}\n"
+                    f"Last retry phase: {phase}\n"
+                    f"Run state: {context.state_store.state_path}\n"
+                    f"Trace log: {trace_path}"
+                )
 
         return context.shared_data
 
@@ -182,6 +198,8 @@ class StepExecutionEngine:
                         "max_characters": (
                             context.config.scenario_body_generation.max_characters
                         ),
+                        "min_dialogue_blocks": context.config.scenario_body_generation.min_dialogue_blocks,
+                        "max_dialogue_blocks": context.config.scenario_body_generation.max_dialogue_blocks,
                         "require_event_mentions": (
                             context.config.scenario_body_generation.require_event_mentions
                         ),

@@ -38,6 +38,10 @@ class ScenarioSectionPromptBuilder:
         chapter: dict[str, Any],
         section: dict[str, Any],
         previous_state: dict[str, Any],
+        min_characters: int = 800,
+        max_characters: int = 1600,
+        min_dialogue_blocks: int = 20,
+        max_dialogue_blocks: int = 40,
         version: str | None = None,
     ) -> RenderedSectionPrompt:
         definition = self.catalog.resolve(self.step_name, version)
@@ -63,6 +67,10 @@ class ScenarioSectionPromptBuilder:
             "previous_state_json": self._json(previous_state),
             "allowed_character_ids_json": self._json(allowed_ids),
             "output_schema_json": self._json(self._schema_bundle()),
+            "min_characters": str(min_characters),
+            "max_characters": str(max_characters),
+            "min_dialogue_blocks": str(min_dialogue_blocks),
+            "max_dialogue_blocks": str(max_dialogue_blocks),
         }
         try:
             text = Template(definition.text).substitute(variables)

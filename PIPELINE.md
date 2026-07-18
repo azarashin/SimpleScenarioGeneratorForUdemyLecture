@@ -52,8 +52,10 @@ configured non-whitespace character range, and mention every required event.
 ```json
 {
   "scenario_body_generation": {
-    "min_characters": 800,
-    "max_characters": 1600,
+    "min_characters": 1400,
+    "max_characters": 3200,
+    "min_dialogue_blocks": 20,
+    "max_dialogue_blocks": 40,
     "require_event_mentions": true
   }
 }

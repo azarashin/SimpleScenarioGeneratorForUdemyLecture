@@ -15,6 +15,8 @@ class ScenarioBodyQualityChecker:
         valid_character_ids: set[str],
         min_characters: int,
         max_characters: int,
+        min_dialogue_blocks: int,
+        max_dialogue_blocks: int,
         require_event_mentions: bool,
     ) -> None:
         location = (
@@ -38,6 +40,11 @@ class ScenarioBodyQualityChecker:
 
         if narration_count == 0 or dialogue_count == 0:
             self._fail(f"{location} must contain narration and dialogue")
+        if not min_dialogue_blocks <= dialogue_count <= max_dialogue_blocks:
+            self._fail(
+                f"{location} dialogue block count must be "
+                f"{min_dialogue_blocks}-{max_dialogue_blocks}, got {dialogue_count}"
+            )
 
         combined_text = "".join(text_parts)
         character_count = sum(not character.isspace() for character in combined_text)
