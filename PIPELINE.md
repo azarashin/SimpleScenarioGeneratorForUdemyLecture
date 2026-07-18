@@ -10,6 +10,16 @@
 - `step-02-generate-outline`: シナリオアウトライン生成
 - `step-03-generate-character-images`: キャラクター基本画像・表情差分生成
 - `step-04-generate-sections`: 章・節本文生成
+- `step-05-generate-dialogue-tags`: セリフ単位の話者・表情タグ生成
+- `step-06-render-html`: 目次・章・節HTMLと話者画像表示の生成
+
+Step 06を単独で実行する場合、メモリ上にないStep 01〜05の生成結果は
+`artifacts/step-NN-*.json` から自動的に読み込まれます。画像マニフェストのパスは
+runディレクトリを基準に解決され、HTML生成前に画像ファイルの存在が確認されます。
+HTMLは `output/<run-id>/index.html` と `chapter-N/` 以下へUTF-8で原子的に
+書き込まれ、runディレクトリ外を指すパスは拒否されます。
+書き込み後は全ページのローカルリンクと画像パスをページ位置から解決し、リンク切れ、
+画像欠損、runディレクトリ外参照が1件でもあればStep 06は失敗します。
 
 シナリオ本文の生成契約は `SCENARIO_BODY_SPEC.md`、会話量を増やすための考え方と調整方法は
 `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。

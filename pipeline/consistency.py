@@ -30,6 +30,8 @@ class PipelineConsistencyChecker:
             self._check_outline(candidate)
         if "scenario_sections" in output:
             self._check_sections(candidate)
+        if "dialogue_expression_tags" in output:
+            self._check_dialogue_expression_tags(candidate)
         if "character_image_assets" in output:
             self._check_character_image_assets(candidate, run_root=run_root)
 
@@ -380,6 +382,42 @@ class PipelineConsistencyChecker:
                     min_dialogue_blocks=body_config.get("min_dialogue_blocks", 1),
                     max_dialogue_blocks=body_config.get("max_dialogue_blocks", 2**31 - 1),
                     require_event_mentions=body_config["require_event_mentions"],
+                )
+
+    def _check_dialogue_expression_tags(self, data: dict[str, Any]) -> None:
+        profiles = self._unique_by_id(data["character_profiles"], "character_profiles")
+        dialogue_blocks = [
+            (section["chapter_no"], section["section_no"], block)
+            for section in data["scenario_sections"]
+            for block in section["narrative_blocks"]
+            if block["type"] == "dialogue"
+        ]
+        tags = data["dialogue_expression_tags"]
+        expected_locations = [
+            (chapter_no, section_no, block["block_id"], block["speaker_id"])
+            for chapter_no, section_no, block in dialogue_blocks
+        ]
+        actual_locations = [
+            (
+                tag["chapter_no"],
+                tag["section_no"],
+                tag["block_id"],
+                tag["speaker_id"],
+            )
+            for tag in tags
+        ]
+        if actual_locations != expected_locations:
+            self._fail(
+                "dialogue expression tags must cover every dialogue block in display order"
+            )
+        for tag in tags:
+            available = profiles[tag["speaker_id"]]["emotion_model"][
+                "available_expressions"
+            ]
+            if tag["expression"] not in available:
+                self._fail(
+                    f"character {tag['speaker_id']} does not support expression "
+                    f"{tag['expression']!r}"
                 )
 
     @staticmethod

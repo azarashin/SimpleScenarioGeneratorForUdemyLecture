@@ -9,6 +9,8 @@ from typing import Any
 
 from PIL import Image
 
+from .asset_manager import CharacterAssetResolver
+from .artifact_loader import PipelineArtifactLoader
 from .character_image_prompt import CharacterImagePromptBuilder, EXPRESSION_CONCEPTS
 from .consistency import PipelineConsistencyChecker
 from .errors import ScenarioGenerationFallbackError
@@ -21,6 +23,9 @@ from .scenario_state import (
     validate_scenario_state,
 )
 from .section_prompt import ScenarioSectionPromptBuilder
+from .html_templates import render_chapter_page, render_index_page, render_section_page
+from .html_output import HtmlOutputWriter
+from .html_validation import HtmlOutputValidator
 from .types import Step, StepContext, StepResult
 
 
@@ -977,10 +982,204 @@ class GenerateSectionsStep(Step):
             )
 
 
+class GenerateDialogueTagsStep(Step):
+    name = "step-05-generate-dialogue-tags"
+    schema_name = "step-05-generate-dialogue-tags.schema.json"
+    input_keys = ("character_profiles", "scenario_sections")
+
+    def run(self, context: StepContext) -> StepResult:
+        profiles = {
+            profile["character_id"]: profile
+            for profile in context.shared_data["character_profiles"]
+        }
+        tags: list[dict[str, Any]] = []
+        for section in context.shared_data["scenario_sections"]:
+            for block in section["narrative_blocks"]:
+                if block["type"] != "dialogue":
+                    continue
+                speaker_id = block["speaker_id"]
+                profile = profiles[speaker_id]
+                expression, reason = self._infer_expression(
+                    str(block["text"]),
+                    profile["emotion_model"]["available_expressions"],
+                )
+                tags.append(
+                    {
+                        "chapter_no": section["chapter_no"],
+                        "section_no": section["section_no"],
+                        "block_id": block["block_id"],
+                        "speaker_id": speaker_id,
+                        "expression": expression,
+                        "emotion_reason": reason,
+                    }
+                )
+
+        return StepResult(
+            output={"dialogue_expression_tags": tags},
+            model="deterministic-rule-based",
+            temperature=context.config.temperature_for(self.name),
+            metadata={"dialogue_tag_count": len(tags)},
+        )
+
+    @staticmethod
+    def _infer_expression(text: str, available: list[str]) -> tuple[str, str]:
+        normalized = text.casefold()
+        rules = (
+            ("angry", ("怒", "許さ", "ふざけ", "damn", "angry"), "怒りを示す語句"),
+            ("sad", ("悲", "つら", "泣", "ごめん", "sad"), "悲しみを示す語句"),
+            ("worried", ("心配", "不安", "大丈夫", "worry"), "心配を示す語句"),
+            ("confused", ("どういう", "わから", "なぜ", "どうして", "?", "？"), "疑問を示す語句"),
+            ("surprised", ("まさか", "本当", "えっ", "!", "！"), "驚きを示す語句"),
+            ("smile", ("ありがとう", "うれし", "よかった", "笑", "glad"), "肯定的な語句"),
+            ("determined", ("必ず", "絶対", "やる", "進もう"), "決意を示す語句"),
+        )
+        available_set = set(available)
+        for expression, markers, reason in rules:
+            if expression in available_set and any(marker in normalized for marker in markers):
+                return expression, reason
+        if "neutral" in available_set:
+            return "neutral", "明確な感情表現がないため中立"
+        return available[0], "利用可能な表情から既定値を選択"
+
+
+class RenderHtmlStep(Step):
+    name = "step-06-render-html"
+    schema_name = "step-06-render-html.schema.json"
+    input_keys = (
+        "scenario_outline",
+        "scenario_sections",
+        "dialogue_expression_tags",
+        "character_image_assets",
+    )
+
+    def prepare_context(self, context: StepContext) -> None:
+        loaded = PipelineArtifactLoader(Path(context.artifacts_dir)).load_missing(
+            context.shared_data,
+            required_keys=self.input_keys,
+            optional_keys=("character_profiles",),
+        )
+        if loaded:
+            context.trace_logger.log(
+                {
+                    "run_id": context.run_id,
+                    "step": self.name,
+                    "event": "artifacts_auto_loaded",
+                    "outputs": list(loaded),
+                }
+            )
+
+    def run(self, context: StepContext) -> StepResult:
+        outline = context.shared_data["scenario_outline"]
+        sections = context.shared_data["scenario_sections"]
+        tags = context.shared_data["dialogue_expression_tags"]
+        run_root = Path(context.artifacts_dir).parent
+        writer = HtmlOutputWriter(run_root)
+        resolver = CharacterAssetResolver.from_pipeline_data(
+            context.shared_data,
+            run_root=run_root,
+            verify_files=True,
+        )
+        sections_by_location = {
+            (section["chapter_no"], section["section_no"]): section
+            for section in sections
+        }
+
+        index_relative = writer.write("index.html", render_index_page(outline=outline))
+        chapter_pages: list[dict[str, Any]] = []
+        section_pages: list[dict[str, Any]] = []
+
+        for chapter in outline["chapters"]:
+            chapter_no = int(chapter["chapter_no"])
+            chapter_dir = f"chapter-{chapter_no}"
+            chapter_relative = writer.write(
+                f"{chapter_dir}/index.html",
+                render_chapter_page(
+                    work_title=outline["title"],
+                    chapter=chapter,
+                    outline=outline,
+                ),
+            )
+            chapter_pages.append(
+                {"chapter_no": chapter_no, "path": chapter_relative}
+            )
+
+            for outline_section in chapter["sections"]:
+                section_no = int(outline_section["section_no"])
+                section = sections_by_location[(chapter_no, section_no)]
+                section_relative = writer.write(
+                    f"{chapter_dir}/section-{section_no}.html",
+                    render_section_page(
+                        work_title=outline["title"],
+                        chapter=chapter,
+                        section=section,
+                        dialogue_tags=tags,
+                        asset_resolver=resolver,
+                        outline=outline,
+                    ),
+                )
+                section_pages.append(
+                    {
+                        "chapter_no": chapter_no,
+                        "section_no": section_no,
+                        "path": section_relative,
+                    }
+                )
+
+        rendering = []
+        for tag in tags:
+            resolved = resolver.resolve(
+                tag["speaker_id"],
+                tag["expression"],
+                relative_to=f"chapter-{tag['chapter_no']}",
+            )
+            rendering.append(
+                {
+                    "chapter_no": tag["chapter_no"],
+                    "section_no": tag["section_no"],
+                    "block_id": tag["block_id"],
+                    "speaker_id": tag["speaker_id"],
+                    "speaker_name": resolved.speaker_name,
+                    "expression": tag["expression"],
+                    "image_path": resolved.image_path,
+                    "alt": resolved.alt,
+                    "is_fallback": resolved.is_fallback,
+                }
+            )
+
+        validation = HtmlOutputValidator(run_root).validate(
+            [
+                index_relative,
+                *(page["path"] for page in chapter_pages),
+                *(page["path"] for page in section_pages),
+            ]
+        )
+
+        return StepResult(
+            output={
+                "rendered_html_pages": {
+                    "index_path": index_relative,
+                    "chapter_pages": chapter_pages,
+                    "section_pages": section_pages,
+                },
+                "dialogue_speaker_image_rendering": rendering,
+            },
+            model="deterministic-template-renderer",
+            temperature=context.config.temperature_for(self.name),
+            metadata={
+                "html_page_count": 1 + len(chapter_pages) + len(section_pages),
+                "validated_link_count": validation.link_count,
+                "validated_image_count": validation.image_count,
+                "dialogue_rendering_count": len(rendering),
+            },
+        )
+
+
 def build_minimal_steps() -> list[Step]:
     return [
         GenerateCharacterProfilesStep(),
         GenerateOutlineStep(),
         GenerateCharacterImagesStep(),
         GenerateSectionsStep(),
+        GenerateDialogueTagsStep(),
+        RenderHtmlStep(),
     ]
