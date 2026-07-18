@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
+import os
 from typing import Any
 
 
@@ -66,7 +67,26 @@ class MockTextGenerationProvider(TextGenerationProvider):
         return GenerationResponse(data=deepcopy(response), model=model)
 
 
-def create_text_generation_provider(provider_name: str) -> TextGenerationProvider:
+def resolve_api_key(environment_variable: str) -> str:
+    value = os.environ.get(environment_variable, "").strip()
+    if not value:
+        raise RuntimeError(
+            f"Text generation API key environment variable is not set: "
+            f"{environment_variable}"
+        )
+    return value
+
+
+def create_text_generation_provider(
+    provider_name: str,
+    *,
+    timeout_seconds: float = 60.0,
+    api_key_env: str = "TEXT_GENERATION_API_KEY",
+) -> TextGenerationProvider:
+    if timeout_seconds <= 0:
+        raise ValueError("Text generation timeout must be greater than zero")
     if provider_name == "mock":
         return MockTextGenerationProvider()
+    # Future network-backed implementations must call resolve_api_key(api_key_env)
+    # here and pass the secret directly to their client without persisting it.
     raise ValueError(f"Unsupported text generation provider: {provider_name}")

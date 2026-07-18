@@ -13,6 +13,26 @@ The generation contract for scenario sections is defined in `SCENARIO_BODY_SPEC.
 Text generation is accessed through `TextGenerationProvider`; local runs and tests use
 the deterministic `MockTextGenerationProvider` implementation.
 
+Text generation connection settings live under `text_generation`. Store only the API
+key environment-variable name in JSON; never put the secret itself in configuration.
+
+```json
+{
+  "text_generation": {
+    "provider": "mock",
+    "model": "gpt-4.1-mini",
+    "timeout_seconds": 60,
+    "api_key_env": "TEXT_GENERATION_API_KEY"
+  }
+}
+```
+
+For a future network-backed provider, set the secret in the process environment:
+
+```powershell
+$env:TEXT_GENERATION_API_KEY = "your-api-key"
+```
+
 ## Run
 
 ```powershell

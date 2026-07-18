@@ -7,6 +7,7 @@ from pipeline.text_generation import (
     MockTextGenerationProvider,
     TextGenerationProvider,
     create_text_generation_provider,
+    resolve_api_key,
 )
 
 
@@ -62,3 +63,16 @@ def test_provider_factory_exposes_mock_and_rejects_unknown_provider() -> None:
 
     with pytest.raises(ValueError, match="Unsupported text generation provider"):
         create_text_generation_provider("unknown")
+
+
+def test_api_key_is_read_from_named_environment_variable(monkeypatch) -> None:
+    monkeypatch.setenv("SCENARIO_TEST_API_KEY", "secret-value")
+
+    assert resolve_api_key("SCENARIO_TEST_API_KEY") == "secret-value"
+
+
+def test_missing_api_key_fails_without_exposing_a_secret(monkeypatch) -> None:
+    monkeypatch.delenv("SCENARIO_MISSING_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="SCENARIO_MISSING_API_KEY"):
+        resolve_api_key("SCENARIO_MISSING_API_KEY")

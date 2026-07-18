@@ -16,6 +16,14 @@ class ImageGenerationConfig:
 
 
 @dataclass(slots=True)
+class TextGenerationConfig:
+    provider: str = "mock"
+    model: str = "gpt-4.1-mini"
+    timeout_seconds: float = 60.0
+    api_key_env: str = "TEXT_GENERATION_API_KEY"
+
+
+@dataclass(slots=True)
 class RetryStrategyConfig:
     short_retries: int = 1
     prompt_revision_retries: int = 1
@@ -34,17 +42,22 @@ class TemperaturePolicyConfig:
 
 @dataclass(slots=True)
 class AppConfig:
-    model_name: str = "gpt-4.1-mini"
     output_root: str = "output"
     artifacts_dir_name: str = "artifacts"
     state_file_name: str = "run-state.json"
     trace_file_name: str = "trace.jsonl"
     image_generation: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
+    text_generation: TextGenerationConfig = field(default_factory=TextGenerationConfig)
     retry_strategy: RetryStrategyConfig = field(default_factory=RetryStrategyConfig)
     temperature_policy: TemperaturePolicyConfig = field(
         default_factory=TemperaturePolicyConfig
     )
     prompt_versions: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def model_name(self) -> str:
+        """Compatibility alias for code that consumes the configured text model."""
+        return self.text_generation.model
 
     def temperature_for(self, step_name: str) -> float:
         if step_name in self.temperature_policy.diversity_steps:
@@ -67,7 +80,6 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 def _to_default_dict() -> dict[str, Any]:
     return {
-        "model_name": DEFAULT_CONFIG.model_name,
         "output_root": DEFAULT_CONFIG.output_root,
         "artifacts_dir_name": DEFAULT_CONFIG.artifacts_dir_name,
         "state_file_name": DEFAULT_CONFIG.state_file_name,
@@ -83,6 +95,12 @@ def _to_default_dict() -> dict[str, Any]:
             "diversity_steps": list(DEFAULT_CONFIG.temperature_policy.diversity_steps),
         },
         "prompt_versions": dict(DEFAULT_CONFIG.prompt_versions),
+        "text_generation": {
+            "provider": DEFAULT_CONFIG.text_generation.provider,
+            "model": DEFAULT_CONFIG.text_generation.model,
+            "timeout_seconds": DEFAULT_CONFIG.text_generation.timeout_seconds,
+            "api_key_env": DEFAULT_CONFIG.text_generation.api_key_env,
+        },
         "image_generation": {
             "provider": DEFAULT_CONFIG.image_generation.provider,
             "model": DEFAULT_CONFIG.image_generation.model,
@@ -103,6 +121,7 @@ def load_config(config_path: str | None) -> AppConfig:
         merged = _deep_merge(merged, user_config)
 
     image_conf = merged.get("image_generation", {})
+    text_conf = merged.get("text_generation", {})
     retry_conf = merged.get("retry_strategy", {})
     temperature_conf = merged.get("temperature_policy", {})
     short_retries = int(retry_conf.get("short_retries", 1))
@@ -116,8 +135,15 @@ def load_config(config_path: str | None) -> AppConfig:
     if low_temperature > diversity_temperature:
         raise ValueError("Low temperature cannot exceed diversity temperature.")
     diversity_steps = tuple(str(item) for item in temperature_conf.get("diversity_steps", ()))
+    text_provider = str(text_conf.get("provider", "")).strip()
+    text_model = str(text_conf.get("model", "")).strip()
+    api_key_env = str(text_conf.get("api_key_env", "")).strip()
+    timeout_seconds = float(text_conf.get("timeout_seconds", 60))
+    if not text_provider or not text_model or not api_key_env:
+        raise ValueError("Text generation provider, model, and api_key_env are required.")
+    if timeout_seconds <= 0:
+        raise ValueError("Text generation timeout_seconds must be greater than zero.")
     return AppConfig(
-        model_name=str(merged["model_name"]),
         output_root=str(merged["output_root"]),
         artifacts_dir_name=str(merged["artifacts_dir_name"]),
         state_file_name=str(merged["state_file_name"]),
@@ -128,6 +154,12 @@ def load_config(config_path: str | None) -> AppConfig:
             width=int(image_conf.get("width", DEFAULT_CONFIG.image_generation.width)),
             height=int(image_conf.get("height", DEFAULT_CONFIG.image_generation.height)),
             style_preset=str(image_conf.get("style_preset", DEFAULT_CONFIG.image_generation.style_preset)),
+        ),
+        text_generation=TextGenerationConfig(
+            provider=text_provider,
+            model=text_model,
+            timeout_seconds=timeout_seconds,
+            api_key_env=api_key_env,
         ),
         retry_strategy=RetryStrategyConfig(
             short_retries=short_retries,

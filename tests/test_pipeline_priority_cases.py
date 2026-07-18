@@ -238,7 +238,11 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     cfg_path.write_text(
         json.dumps(
             {
-                "model_name": "overridden",
+                "text_generation": {
+                    "model": "overridden",
+                    "timeout_seconds": 30,
+                    "api_key_env": "TEST_TEXT_API_KEY",
+                },
                 "image_generation": {"provider": "stub"},
             }
         ),
@@ -248,6 +252,9 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     conf = load_config(str(cfg_path))
 
     assert conf.model_name == "overridden"
+    assert conf.text_generation.provider == "mock"
+    assert conf.text_generation.timeout_seconds == 30
+    assert conf.text_generation.api_key_env == "TEST_TEXT_API_KEY"
     assert conf.retry_strategy == RetryStrategyConfig()
     assert conf.temperature_policy == TemperaturePolicyConfig()
     assert conf.image_generation.provider == "stub"
