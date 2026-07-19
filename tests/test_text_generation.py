@@ -425,13 +425,17 @@ def test_invalid_section_is_retried_before_checkpoint_is_saved(make_context) -> 
     assert provider.calls == 2
     assert "PROMPT REVISION" in provider.prompts[1]
     assert "前回の生成結果には次の問題がありました:" in provider.prompts[1]
-    assert "body length must be 800-1600" in provider.prompts[1]
+    body_config = context.config.scenario_body_generation
+    assert (
+        f"body length must be {body_config.min_characters}-{body_config.max_characters}"
+        in provider.prompts[1]
+    )
     assert "JSONだけを再出力してください" in provider.prompts[1]
     assert sum(event.get("event") == "section_generated" for event in trace.events) == 1
     checkpoint = Path(context.artifacts_dir) / "sections" / "chapter-001-section-001.json"
     payload = json.loads(checkpoint.read_text(encoding="utf-8"))
     combined = "".join(block["text"] for block in payload["section"]["narrative_blocks"])
-    assert sum(not character.isspace() for character in combined) >= 800
+    assert sum(not character.isspace() for character in combined) >= body_config.min_characters
 
 
 def test_invalid_existing_checkpoint_is_regenerated(make_context) -> None:

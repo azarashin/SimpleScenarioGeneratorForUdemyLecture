@@ -31,8 +31,8 @@ class TextGenerationConfig:
 
 @dataclass(slots=True)
 class ScenarioBodyGenerationConfig:
-    min_characters: int = 800
-    max_characters: int = 1600
+    min_characters: int = 3000
+    max_characters: int = 3500
     min_dialogue_blocks: int = 20
     max_dialogue_blocks: int = 40
     require_event_mentions: bool = True
@@ -210,8 +210,16 @@ def load_config(config_path: str | None) -> AppConfig:
         raise ValueError("Text generation provider, model, and api_key_env are required.")
     if timeout_seconds <= 0:
         raise ValueError("Text generation timeout_seconds must be greater than zero.")
-    min_characters = int(body_conf.get("min_characters", 800))
-    max_characters = int(body_conf.get("max_characters", 1600))
+    min_characters = int(
+        body_conf.get(
+            "min_characters", DEFAULT_CONFIG.scenario_body_generation.min_characters
+        )
+    )
+    max_characters = int(
+        body_conf.get(
+            "max_characters", DEFAULT_CONFIG.scenario_body_generation.max_characters
+        )
+    )
     min_dialogue_blocks = int(body_conf.get("min_dialogue_blocks", 20))
     max_dialogue_blocks = int(body_conf.get("max_dialogue_blocks", 40))
     if min_characters <= 0 or max_characters < min_characters:

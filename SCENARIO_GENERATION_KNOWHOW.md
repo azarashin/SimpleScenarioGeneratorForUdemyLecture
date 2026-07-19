@@ -32,8 +32,8 @@
 ```json
 {
   "scenario_body_generation": {
-    "min_characters": 1000,
-    "max_characters": 3200,
+    "min_characters": 3000,
+    "max_characters": 3500,
     "min_dialogue_blocks": 20,
     "max_dialogue_blocks": 40,
     "require_event_mentions": true
@@ -54,8 +54,9 @@
 
 今回の目的ではセリフ数が主要な指標です。実際に23セリフ、5ナレーション、
 1331文字のセクションは十分な会話量を持っていましたが、文字数下限を1400にすると
-不必要に拒否されました。このため、文字数下限は1000に設定し、セリフ20〜40件を
-中心的な品質条件としています。
+不必要に拒否されました。この知見を踏まえつつ、現在は完成コンテンツとして十分な
+読み応えを持たせるため、1セクション3,000〜3,500文字を既定値としています。
+分量を減らしたい用途では、設定ファイルの上下限を明示的に変更します。
 
 文字数下限を高くしすぎると、次の問題が起きます。
 
@@ -158,8 +159,8 @@ Step 04以降の本文、セリフ表情タグ、HTMLは更新されます。`--
 ```json
 {
   "scenario_body_generation": {
-    "min_characters": 1800,
-    "max_characters": 3000,
+    "min_characters": 3000,
+    "max_characters": 3500,
     "min_dialogue_blocks": 30,
     "max_dialogue_blocks": 60,
     "require_event_mentions": true

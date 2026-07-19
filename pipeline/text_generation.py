@@ -204,8 +204,8 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
         character_match = re.search(
             r"Produce (\d+) to (\d+) non-whitespace characters", prompt
         )
-        min_characters = int(character_match.group(1)) if character_match else 800
-        max_characters = int(character_match.group(2)) if character_match else 1600
+        min_characters = int(character_match.group(1)) if character_match else 3000
+        max_characters = int(character_match.group(2)) if character_match else 3500
         dialogue_characters = sum(
             sum(not character.isspace() for character in block["text"])
             for block in dialogue_blocks
