@@ -6,10 +6,12 @@
     "api_key_env": "TEXT_GENERATION_API_KEY"
   },
   "scenario_body_generation": {
-    "min_characters": 3000,
-    "max_characters": 3500,
-    "min_dialogue_blocks": 20,
-    "max_dialogue_blocks": 40,
+    "subsections_per_section": 3,
+    "target_characters": 1200,
+    "min_characters": 1000,
+    "max_characters": 1600,
+    "min_dialogue_blocks": 6,
+    "max_dialogue_blocks": 14,
     "require_event_mentions": true
   },
   "temperature_policy": {

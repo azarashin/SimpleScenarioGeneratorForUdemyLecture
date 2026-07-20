@@ -330,6 +330,26 @@ class PipelineConsistencyChecker:
                         f"chapter {chapter['chapter_no']} section {section['section_no']} "
                         f"references unknown characters: {sorted(unknown)}"
                     )
+                subsections = section.get("subsections", [])
+                if subsections:
+                    self._require_sequence(
+                        [item["subsection_no"] for item in subsections],
+                        len(subsections),
+                        (
+                            f"chapter {chapter['chapter_no']} section "
+                            f"{section['section_no']} subsection timeline"
+                        ),
+                    )
+                    subsection_events = {
+                        event for item in subsections for event in item["key_events"]
+                    }
+                    missing_events = set(section["key_events"]) - subsection_events
+                    if missing_events:
+                        self._fail(
+                            f"chapter {chapter['chapter_no']} section "
+                            f"{section['section_no']} subsections are missing events: "
+                            f"{sorted(missing_events)}"
+                        )
 
     def _check_sections(self, data: dict[str, Any]) -> None:
         outline_by_location = {

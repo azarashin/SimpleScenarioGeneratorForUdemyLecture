@@ -4,11 +4,11 @@ from copy import deepcopy
 from typing import Any
 
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 
 def create_initial_scenario_state(character_ids: set[str]) -> dict[str, Any]:
-    """Create the explicit state passed into the first generated section."""
+    """Create the compact cumulative state passed into scenario generation."""
     return {
         "state_version": STATE_VERSION,
         "current_section": None,
@@ -18,9 +18,10 @@ def create_initial_scenario_state(character_ids: set[str]) -> dict[str, Any]:
         "possessions": {character_id: [] for character_id in sorted(character_ids)},
         "known_information": [],
         "relationship_changes": [],
+        "introduced_entities": [],
         "occurred_events": [],
         "unresolved_plot_threads": [],
-        "previous_section": None,
+        "recent_context": None,
     }
 
 
@@ -31,25 +32,66 @@ def advance_scenario_state(
     outline_section: dict[str, Any],
     generated_section: dict[str, Any],
 ) -> dict[str, Any]:
-    """Carry state forward and retain the complete previous section as evidence."""
+    """Merge explicit output updates into compact cumulative story state."""
     state = deepcopy(previous_state)
     state["state_version"] = STATE_VERSION
     state["current_section"] = {
         "chapter_no": chapter_no,
         "section_no": outline_section["section_no"],
     }
-    occurred_events = list(state.get("occurred_events", []))
-    for event in outline_section["key_events"]:
-        occurred_events.append(
-            {
-                "chapter_no": chapter_no,
-                "section_no": outline_section["section_no"],
-                "event": event,
-            }
+    updates = generated_section["state_updates"]
+    character_ids = set(state["character_locations"])
+
+    for location_update in updates["character_locations"]:
+        character_id = location_update["character_id"]
+        if character_id not in character_ids:
+            raise ValueError(
+                f"Scenario state update contains unknown character {character_id!r}"
+            )
+        state["character_locations"][character_id] = location_update["location"]
+
+    for possession_update in updates["possessions"]:
+        character_id = possession_update["character_id"]
+        if character_id not in character_ids:
+            raise ValueError(
+                f"Scenario state update contains unknown character {character_id!r}"
+            )
+        state["possessions"][character_id] = _unique_strings(
+            possession_update["items"]
         )
+
+    state["known_information"] = _merge_strings(
+        state["known_information"], updates["known_information"]
+    )
+    state["relationship_changes"] = _merge_strings(
+        state["relationship_changes"], updates["relationship_changes"]
+    )
+    state["introduced_entities"] = _merge_entities(
+        state["introduced_entities"], updates["introduced_entities"]
+    )
+
+    occurred_events = list(state["occurred_events"])
+    for event in outline_section["key_events"]:
+        event_record = {
+            "chapter_no": chapter_no,
+            "section_no": outline_section["section_no"],
+            "event": event,
+        }
+        if event_record not in occurred_events:
+            occurred_events.append(event_record)
     state["occurred_events"] = occurred_events
-    state["previous_section"] = deepcopy(generated_section)
-    validate_scenario_state(state)
+
+    resolved = set(updates["resolved_plot_threads"])
+    unresolved = [
+        thread
+        for thread in state["unresolved_plot_threads"]
+        if thread not in resolved
+    ]
+    state["unresolved_plot_threads"] = _merge_strings(
+        unresolved, updates["unresolved_plot_threads"]
+    )
+    state["recent_context"] = updates["continuity_summary"]
+    validate_scenario_state(state, expected_character_ids=character_ids)
     return state
 
 
@@ -66,9 +108,10 @@ def validate_scenario_state(
         "possessions",
         "known_information",
         "relationship_changes",
+        "introduced_entities",
         "occurred_events",
         "unresolved_plot_threads",
-        "previous_section",
+        "recent_context",
     }
     if not isinstance(state, dict) or set(state) != required:
         raise ValueError("Scenario state has missing or unknown fields")
@@ -88,6 +131,7 @@ def validate_scenario_state(
     for field in (
         "known_information",
         "relationship_changes",
+        "introduced_entities",
         "occurred_events",
         "unresolved_plot_threads",
     ):
@@ -97,7 +141,24 @@ def validate_scenario_state(
         state["current_section"], dict
     ):
         raise ValueError("Scenario current_section must be an object or null")
-    if state["previous_section"] is not None and not isinstance(
-        state["previous_section"], dict
+    if state["recent_context"] is not None and not isinstance(
+        state["recent_context"], str
     ):
-        raise ValueError("Scenario previous_section must be an object or null")
+        raise ValueError("Scenario recent_context must be a string or null")
+
+
+def _unique_strings(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(items))
+
+
+def _merge_strings(existing: list[str], updates: list[str]) -> list[str]:
+    return _unique_strings([*existing, *updates])
+
+
+def _merge_entities(
+    existing: list[dict[str, Any]], updates: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    by_id = {item["entity_id"]: deepcopy(item) for item in existing}
+    for item in updates:
+        by_id[item["entity_id"]] = deepcopy(item)
+    return list(by_id.values())

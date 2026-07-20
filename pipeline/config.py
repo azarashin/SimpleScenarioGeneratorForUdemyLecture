@@ -31,10 +31,12 @@ class TextGenerationConfig:
 
 @dataclass(slots=True)
 class ScenarioBodyGenerationConfig:
-    min_characters: int = 3000
-    max_characters: int = 3500
-    min_dialogue_blocks: int = 20
-    max_dialogue_blocks: int = 40
+    subsections_per_section: int = 3
+    target_characters: int = 1200
+    min_characters: int = 1000
+    max_characters: int = 1600
+    min_dialogue_blocks: int = 6
+    max_dialogue_blocks: int = 14
     require_event_mentions: bool = True
 
 
@@ -120,6 +122,10 @@ def _to_default_dict() -> dict[str, Any]:
             "api_key_env": DEFAULT_CONFIG.text_generation.api_key_env,
         },
         "scenario_body_generation": {
+            "subsections_per_section": (
+                DEFAULT_CONFIG.scenario_body_generation.subsections_per_section
+            ),
+            "target_characters": DEFAULT_CONFIG.scenario_body_generation.target_characters,
             "min_characters": DEFAULT_CONFIG.scenario_body_generation.min_characters,
             "max_characters": DEFAULT_CONFIG.scenario_body_generation.max_characters,
             "min_dialogue_blocks": DEFAULT_CONFIG.scenario_body_generation.min_dialogue_blocks,
@@ -210,6 +216,12 @@ def load_config(config_path: str | None) -> AppConfig:
         raise ValueError("Text generation provider, model, and api_key_env are required.")
     if timeout_seconds <= 0:
         raise ValueError("Text generation timeout_seconds must be greater than zero.")
+    target_characters = int(
+        body_conf.get(
+            "target_characters",
+            DEFAULT_CONFIG.scenario_body_generation.target_characters,
+        )
+    )
     min_characters = int(
         body_conf.get(
             "min_characters", DEFAULT_CONFIG.scenario_body_generation.min_characters
@@ -220,9 +232,30 @@ def load_config(config_path: str | None) -> AppConfig:
             "max_characters", DEFAULT_CONFIG.scenario_body_generation.max_characters
         )
     )
-    min_dialogue_blocks = int(body_conf.get("min_dialogue_blocks", 20))
-    max_dialogue_blocks = int(body_conf.get("max_dialogue_blocks", 40))
-    if min_characters <= 0 or max_characters < min_characters:
+    subsections_per_section = int(
+        body_conf.get(
+            "subsections_per_section",
+            DEFAULT_CONFIG.scenario_body_generation.subsections_per_section,
+        )
+    )
+    min_dialogue_blocks = int(
+        body_conf.get(
+            "min_dialogue_blocks",
+            DEFAULT_CONFIG.scenario_body_generation.min_dialogue_blocks,
+        )
+    )
+    max_dialogue_blocks = int(
+        body_conf.get(
+            "max_dialogue_blocks",
+            DEFAULT_CONFIG.scenario_body_generation.max_dialogue_blocks,
+        )
+    )
+    if (
+        subsections_per_section <= 0
+        or min_characters <= 0
+        or max_characters < min_characters
+        or not min_characters <= target_characters <= max_characters
+    ):
         raise ValueError("Scenario body character limits are invalid.")
     if min_dialogue_blocks <= 0 or max_dialogue_blocks < min_dialogue_blocks:
         raise ValueError("Scenario body dialogue block limits are invalid.")
@@ -251,6 +284,8 @@ def load_config(config_path: str | None) -> AppConfig:
             api_key_env=api_key_env,
         ),
         scenario_body_generation=ScenarioBodyGenerationConfig(
+            subsections_per_section=subsections_per_section,
+            target_characters=target_characters,
             min_characters=min_characters,
             max_characters=max_characters,
             min_dialogue_blocks=min_dialogue_blocks,

@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.config import AppConfig, ImageGenerationConfig, TextGenerationConfig
+from pipeline.config import (
+    AppConfig,
+    ImageGenerationConfig,
+    ScenarioBodyGenerationConfig,
+    TextGenerationConfig,
+)
 from pipeline.image_generation import create_image_generation_provider
 from pipeline.state import RunStateStore
 from pipeline.trace import TraceLogger
@@ -36,6 +41,9 @@ def base_config(tmp_path: Path) -> AppConfig:
             expression_sheet_height=1024,
         ),
         text_generation=TextGenerationConfig(model="test-model"),
+        scenario_body_generation=ScenarioBodyGenerationConfig(
+            subsections_per_section=1
+        ),
     )
 
 

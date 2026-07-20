@@ -145,6 +145,9 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
             raise ValueError("Scenario mock prompt does not contain TARGET SECTION")
         json_start = marker_index + len(self.target_marker)
         section, _ = json.JSONDecoder().raw_decode(prompt[json_start:])
+        subsection_marker = "TARGET SUBSECTION\n"
+        subsection_start = prompt.index(subsection_marker) + len(subsection_marker)
+        subsection, _ = json.JSONDecoder().raw_decode(prompt[subsection_start:])
         chapter_no = section.get("chapter_no")
         if chapter_no is None:
             # The chapter number is supplied in the separate chapter object.
@@ -153,19 +156,14 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
             chapter, _ = json.JSONDecoder().raw_decode(prompt[chapter_start:])
             chapter_no = chapter["chapter_no"]
         section_no = section["section_no"]
-        events = " / ".join(section["key_events"])
-        purpose = section["section_purpose"]
+        events = " / ".join(subsection["key_events"])
+        purpose = subsection["subsection_purpose"]
+        subsection_no = subsection["subsection_no"]
         previous_start = prompt.index(self.previous_state_marker) + len(
             self.previous_state_marker
         )
         previous_state, _ = json.JSONDecoder().raw_decode(prompt[previous_start:])
-        previous_section = previous_state.get("previous_section")
-        previous_summary = "The story begins here."
-        if isinstance(previous_section, dict):
-            previous_summary = " ".join(
-                block.get("text", "")
-                for block in previous_section.get("narrative_blocks", [])
-            )[:180]
+        previous_summary = previous_state.get("recent_context") or "The story begins here."
         previous_events = " / ".join(
             str(item.get("event", ""))
             for item in previous_state.get("occurred_events", [])[-4:]
@@ -192,7 +190,7 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
         dialogue_count = int(dialogue_match.group(1)) if dialogue_match else 1
         dialogue_blocks = [
             {
-                "block_id": f"b-{chapter_no}-{section_no}-{index + 2}",
+                "block_id": f"b-{chapter_no}-{section_no}-{subsection_no}-{index + 2}",
                 "type": "dialogue",
                 "text": dialogue if index == 0 else f"Turn {index + 1} advances.",
                 "speaker_id": section["participating_characters"][
@@ -202,16 +200,20 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
             for index in range(dialogue_count)
         ]
         character_match = re.search(
-            r"Produce (\d+) to (\d+) non-whitespace characters", prompt
+            r"Accepted length is (\d+) to (\d+) non-whitespace characters", prompt
         )
-        min_characters = int(character_match.group(1)) if character_match else 3000
-        max_characters = int(character_match.group(2)) if character_match else 3500
+        target_match = re.search(
+            r"Aim for approximately (\d+) non-whitespace characters", prompt
+        )
+        min_characters = int(character_match.group(1)) if character_match else 1000
+        max_characters = int(character_match.group(2)) if character_match else 1600
+        requested_target = int(target_match.group(1)) if target_match else 1200
         dialogue_characters = sum(
             sum(not character.isspace() for character in block["text"])
             for block in dialogue_blocks
         )
         narration_characters = sum(not character.isspace() for character in narration)
-        target_characters = min(max_characters, min_characters + 100)
+        target_characters = min(max_characters, max(min_characters, requested_target))
         padding_needed = max(
             0, target_characters - dialogue_characters - narration_characters
         )
@@ -225,13 +227,26 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
                     "section_title": section["section_title"],
                     "narrative_blocks": [
                         {
-                            "block_id": f"b-{chapter_no}-{section_no}-1",
+                            "block_id": f"b-{chapter_no}-{section_no}-{subsection_no}-1",
                             "type": "narration",
                             "text": narration,
                             "speaker_id": None,
                         },
                         *dialogue_blocks,
                     ],
+                    "state_updates": {
+                        "character_locations": [],
+                        "possessions": [],
+                        "known_information": [events],
+                        "relationship_changes": [],
+                        "introduced_entities": [],
+                        "unresolved_plot_threads": [],
+                        "resolved_plot_threads": [],
+                        "continuity_summary": (
+                            f"Chapter {chapter_no} section {section_no} beat "
+                            f"{subsection_no} completed: {events}."
+                        ),
+                    },
                 }
             ]
         }
@@ -299,6 +314,7 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
 
 
 def _scenario_section_response_schema() -> dict[str, Any]:
+    non_empty_string = {"type": "string", "minLength": 1}
     block_schema = {
         "type": "object",
         "required": ["block_id", "type", "text", "speaker_id"],
@@ -312,9 +328,100 @@ def _scenario_section_response_schema() -> dict[str, Any]:
             },
         },
     }
+    character_location_schema = {
+        "type": "object",
+        "required": ["character_id", "location"],
+        "additionalProperties": False,
+        "properties": {
+            "character_id": non_empty_string,
+            "location": {
+                "anyOf": [non_empty_string, {"type": "null"}],
+            },
+        },
+    }
+    possession_schema = {
+        "type": "object",
+        "required": ["character_id", "items"],
+        "additionalProperties": False,
+        "properties": {
+            "character_id": non_empty_string,
+            "items": {"type": "array", "items": non_empty_string},
+        },
+    }
+    entity_schema = {
+        "type": "object",
+        "required": ["entity_id", "type", "name", "description"],
+        "additionalProperties": False,
+        "properties": {
+            "entity_id": non_empty_string,
+            "type": {
+                "type": "string",
+                "enum": [
+                    "character",
+                    "location",
+                    "organization",
+                    "object",
+                    "concept",
+                ],
+            },
+            "name": non_empty_string,
+            "description": non_empty_string,
+        },
+    }
+    state_updates_schema = {
+        "type": "object",
+        "required": [
+            "character_locations",
+            "possessions",
+            "known_information",
+            "relationship_changes",
+            "introduced_entities",
+            "unresolved_plot_threads",
+            "resolved_plot_threads",
+            "continuity_summary",
+        ],
+        "additionalProperties": False,
+        "properties": {
+            "character_locations": {
+                "type": "array",
+                "items": character_location_schema,
+            },
+            "possessions": {
+                "type": "array",
+                "items": possession_schema,
+            },
+            "known_information": {
+                "type": "array",
+                "items": non_empty_string,
+            },
+            "relationship_changes": {
+                "type": "array",
+                "items": non_empty_string,
+            },
+            "introduced_entities": {
+                "type": "array",
+                "items": entity_schema,
+            },
+            "unresolved_plot_threads": {
+                "type": "array",
+                "items": non_empty_string,
+            },
+            "resolved_plot_threads": {
+                "type": "array",
+                "items": non_empty_string,
+            },
+            "continuity_summary": non_empty_string,
+        },
+    }
     section_schema = {
         "type": "object",
-        "required": ["chapter_no", "section_no", "section_title", "narrative_blocks"],
+        "required": [
+            "chapter_no",
+            "section_no",
+            "section_title",
+            "narrative_blocks",
+            "state_updates",
+        ],
         "additionalProperties": False,
         "properties": {
             "chapter_no": {"type": "integer", "minimum": 1},
@@ -325,6 +432,7 @@ def _scenario_section_response_schema() -> dict[str, Any]:
                 "minItems": 2,
                 "items": block_schema,
             },
+            "state_updates": state_updates_schema,
         },
     }
     return {

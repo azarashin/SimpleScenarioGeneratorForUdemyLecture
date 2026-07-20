@@ -29,6 +29,7 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
         character_profiles=context.shared_data["character_profiles"],
         chapter=chapter,
         section=section,
+        subsection=section["subsections"][0],
         previous_state=previous_state,
         version="v2",
     )
@@ -46,7 +47,12 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
     assert "scenario-sections.schema.json" in prompt.text
     assert "narration requires speaker_id=null" in prompt.text
     assert "dialogue requires a speaker_id" in prompt.text
-    assert "20 to 40 dialogue blocks" in prompt.text
+    assert "6 to 14 dialogue blocks" in prompt.text
+    assert "TARGET SUBSECTION" in prompt.text
+    assert "Populate state_updates with every durable fact" in prompt.text
+    assert "compact cumulative state is authoritative" in prompt.text
+    assert "Aim for approximately 1200 non-whitespace characters" in prompt.text
+    assert "Accepted length is 1000 to 1600 non-whitespace characters" in prompt.text
     assert '"maxItems": 1' in prompt.text
     assert '{"scenario_sections": [one target section]}' in prompt.text
 
@@ -61,6 +67,12 @@ def test_section_prompt_rejects_unknown_participating_character(make_context) ->
             character_profiles=context.shared_data["character_profiles"],
             chapter=chapter,
             section=section,
+            subsection={
+                "subsection_no": 1,
+                "subsection_title": "Beat",
+                "subsection_purpose": "Test",
+                "key_events": ["event"],
+            },
             previous_state={},
             version="v2",
         )

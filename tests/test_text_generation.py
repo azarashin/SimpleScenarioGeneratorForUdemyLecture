@@ -244,6 +244,26 @@ def test_scenario_sections_are_generated_and_checkpointed_individually(make_cont
     ) == 1
 
 
+def test_section_is_generated_as_subsections_and_merged(make_context) -> None:
+    context, trace = make_context()
+    context.config.scenario_body_generation.subsections_per_section = 3
+    provider = context.text_generation_provider
+
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+
+    assert len(output["scenario_sections"]) == 1
+    assert len(provider.requests) == 3
+    checkpoints = list(
+        (Path(context.artifacts_dir) / "sections").glob("*-subsection-*.json")
+    )
+    assert len(checkpoints) == 3
+    blocks = output["scenario_sections"][0]["narrative_blocks"]
+    assert len({block["block_id"] for block in blocks}) == len(blocks)
+    assert sum(
+        event.get("event") == "subsection_generated" for event in trace.events
+    ) == 3
+
+
 def test_section_retry_reuses_completed_checkpoint(make_context) -> None:
     context, trace = make_context()
     context.shared_data["input"]["scenario_idea"]["target_length"] = {
@@ -294,6 +314,19 @@ def test_openai_provider_uses_responses_api_and_parses_json() -> None:
     assert responses.calls[0]["temperature"] == 0.2
     assert responses.calls[0]["text"]["format"]["type"] == "json_schema"
     assert responses.calls[0]["text"]["format"]["strict"] is True
+    response_schema = responses.calls[0]["text"]["format"]["schema"]
+    section_schema = response_schema["properties"]["scenario_sections"]["items"]
+    assert "state_updates" in section_schema["required"]
+    assert set(section_schema["properties"]["state_updates"]["required"]) == {
+        "character_locations",
+        "possessions",
+        "known_information",
+        "relationship_changes",
+        "introduced_entities",
+        "unresolved_plot_threads",
+        "resolved_plot_threads",
+        "continuity_summary",
+    }
 
 
 def test_openai_provider_rejects_non_json_output() -> None:
@@ -414,7 +447,9 @@ def test_unknown_speaker_id_is_rejected(make_context) -> None:
     assert "unknown speaker 'undefined-character'" in failures[0]["failure_reason"]
 
 
-def test_invalid_section_is_retried_before_checkpoint_is_saved(make_context) -> None:
+def test_under_length_section_is_supplemented_before_checkpoint_is_saved(
+    make_context,
+) -> None:
     context, trace = make_context()
     provider = UnderLengthOnceProvider()
     context.text_generation_provider = provider
@@ -423,14 +458,19 @@ def test_invalid_section_is_retried_before_checkpoint_is_saved(make_context) -> 
 
     assert len(output["scenario_sections"]) == 1
     assert provider.calls == 2
-    assert "PROMPT REVISION" in provider.prompts[1]
-    assert "前回の生成結果には次の問題がありました:" in provider.prompts[1]
+    assert "SUPPLEMENTAL EXPANSION PHASE" in provider.prompts[1]
+    assert "PREVIOUS GENERATED JSON" in provider.prompts[1]
     body_config = context.config.scenario_body_generation
-    assert (
-        f"body length must be {body_config.min_characters}-{body_config.max_characters}"
-        in provider.prompts[1]
+    assert f"remain within {body_config.min_characters}-{body_config.max_characters}" in (
+        provider.prompts[1]
     )
-    assert "JSONだけを再出力してください" in provider.prompts[1]
+    assert sum(
+        event.get("event") == "subsection_supplement_succeeded"
+        for event in trace.events
+    ) == 1
+    assert not any(
+        event.get("event") == "step_retry_scheduled" for event in trace.events
+    )
     assert sum(event.get("event") == "section_generated" for event in trace.events) == 1
     checkpoint = Path(context.artifacts_dir) / "sections" / "chapter-001-section-001.json"
     payload = json.loads(checkpoint.read_text(encoding="utf-8"))

@@ -265,8 +265,10 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     assert conf.image_generation.output_format == "png"
     assert conf.image_generation.timeout_seconds == 120
     assert conf.image_generation.api_key_env == "OPENAI_API_KEY"
-    assert conf.scenario_body_generation.min_characters == 3000
-    assert conf.scenario_body_generation.max_characters == 3500
+    assert conf.scenario_body_generation.subsections_per_section == 3
+    assert conf.scenario_body_generation.target_characters == 1200
+    assert conf.scenario_body_generation.min_characters == 1000
+    assert conf.scenario_body_generation.max_characters == 1600
 
 
 def test_scenario_body_length_can_be_overridden(tmp_path: Path) -> None:
@@ -275,6 +277,7 @@ def test_scenario_body_length_can_be_overridden(tmp_path: Path) -> None:
         json.dumps(
             {
                 "scenario_body_generation": {
+                    "target_characters": 2500,
                     "min_characters": 2200,
                     "max_characters": 2800,
                 }
@@ -285,8 +288,28 @@ def test_scenario_body_length_can_be_overridden(tmp_path: Path) -> None:
 
     conf = load_config(str(cfg_path))
 
+    assert conf.scenario_body_generation.target_characters == 2500
     assert conf.scenario_body_generation.min_characters == 2200
     assert conf.scenario_body_generation.max_characters == 2800
+
+
+def test_scenario_body_target_must_be_within_acceptance_range(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "scenario_body_generation": {
+                    "target_characters": 4000,
+                    "min_characters": 2800,
+                    "max_characters": 3800,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="character limits"):
+        load_config(str(cfg_path))
 
 
 def test_p1_config_rejects_expression_sheet_dimensions_not_divisible_by_four(
@@ -377,7 +400,12 @@ def test_scenario_body_quality_checks_length_and_required_events(make_context) -
     character_count = sum(not character.isspace() for character in combined)
 
     body_config = context.config.scenario_body_generation
-    assert body_config.min_characters <= character_count <= body_config.max_characters
+    subsection_count = body_config.subsections_per_section
+    assert (
+        body_config.min_characters * subsection_count
+        <= character_count
+        <= body_config.max_characters * subsection_count
+    )
     required_events = output["scenario_outline"]["chapters"][0]["sections"][0]["key_events"]
     assert all(event in combined for event in required_events)
 
@@ -387,8 +415,10 @@ def test_scenario_body_quality_checks_length_and_required_events(make_context) -
     consistency_data = {
         **output,
         "_scenario_body_generation_config": {
-            "min_characters": body_config.min_characters,
-            "max_characters": body_config.max_characters,
+            "min_characters": body_config.min_characters * subsection_count,
+            "max_characters": body_config.max_characters * subsection_count,
+            "min_dialogue_blocks": body_config.min_dialogue_blocks * subsection_count,
+            "max_dialogue_blocks": body_config.max_dialogue_blocks * subsection_count,
             "require_event_mentions": True,
         },
     }

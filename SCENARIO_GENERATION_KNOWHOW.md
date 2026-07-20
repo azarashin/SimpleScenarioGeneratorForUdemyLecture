@@ -32,10 +32,12 @@
 ```json
 {
   "scenario_body_generation": {
-    "min_characters": 3000,
-    "max_characters": 3500,
-    "min_dialogue_blocks": 20,
-    "max_dialogue_blocks": 40,
+    "subsections_per_section": 3,
+    "target_characters": 1200,
+    "min_characters": 1000,
+    "max_characters": 1600,
+    "min_dialogue_blocks": 6,
+    "max_dialogue_blocks": 14,
     "require_event_mentions": true
   }
 }
@@ -55,8 +57,10 @@
 今回の目的ではセリフ数が主要な指標です。実際に23セリフ、5ナレーション、
 1331文字のセクションは十分な会話量を持っていましたが、文字数下限を1400にすると
 不必要に拒否されました。この知見を踏まえつつ、現在は完成コンテンツとして十分な
-読み応えを持たせるため、1セクション3,000〜3,500文字を既定値としています。
-分量を減らしたい用途では、設定ファイルの上下限を明示的に変更します。
+読み応えと生成安定性を両立するため、1セクションを既定で3サブセクションに分けます。
+各サブセクションは1,200文字を生成目標、1,000〜1,600文字を合格範囲とし、生成後に
+1つのセクションへ結合します。分量を変更する用途では、分割数、生成目標、合格範囲を
+セットで調整します。
 
 文字数下限を高くしすぎると、次の問題が起きます。
 
@@ -159,10 +163,12 @@ Step 04以降の本文、セリフ表情タグ、HTMLは更新されます。`--
 ```json
 {
   "scenario_body_generation": {
-    "min_characters": 3000,
-    "max_characters": 3500,
-    "min_dialogue_blocks": 30,
-    "max_dialogue_blocks": 60,
+    "subsections_per_section": 3,
+    "target_characters": 1200,
+    "min_characters": 1000,
+    "max_characters": 1600,
+    "min_dialogue_blocks": 10,
+    "max_dialogue_blocks": 20,
     "require_event_mentions": true
   }
 }
@@ -178,6 +184,28 @@ Step 04以降の本文、セリフ表情タグ、HTMLは更新されます。`--
 下限を急に高くすると、自然なシナリオまで不合格になり、APIの再試行回数と料金が
 増える場合があります。まず1章分を生成し、`rejected.json`の実測値と完成HTMLを
 確認してから全体へ適用します。
+
+文字数下限だけを満たさなかった場合、Step 04は生成済み本文を捨てずに補完生成を1回
+行います。不足文字数をモデルへ伝え、既存の事実・出来事の順序・話者・会話の意図を
+維持しながら、反応、行動、因果関係、次への遷移を加筆します。補完結果も通常と同じ
+スキーマ、文字数、セリフ数、イベント網羅条件で再検証されます。
+
+### 本文で追加された情報の引き継ぎ
+
+各サブセクションの出力には `state_updates` が含まれます。本文中で追加・変更された永続的な
+情報を、次のサブセクションへ渡す累積状態へマージします。
+
+- `character_locations`: 変更されたキャラクターの現在地
+- `possessions`: 変更されたキャラクターの現在の所持品一覧
+- `known_information`: 後続でも有効な判明事項
+- `relationship_changes`: 後続へ影響する関係変化
+- `introduced_entities`: 新しく確立した人物、場所、組織、物、概念
+- `unresolved_plot_threads`: 新しく残った疑問や伏線
+- `resolved_plot_threads`: この場面で解決した既存の伏線
+- `continuity_summary`: 次の場面が必要とする直近状況の短い要約
+
+過去の本文全文は次のプロンプトへ連結しません。累積した構造化情報と直近要約を渡すため、
+長いシナリオでもプロンプトの増加を抑えつつ、追加設定を後続へ維持できます。
 
 ### シナリオ修正時の再開位置を選ぶ
 

@@ -36,6 +36,19 @@ def _profiles():
     ]
 
 
+def _state_updates():
+    return {
+        "character_locations": [],
+        "possessions": [],
+        "known_information": [],
+        "relationship_changes": [],
+        "introduced_entities": [],
+        "unresolved_plot_threads": [],
+        "resolved_plot_threads": [],
+        "continuity_summary": "葵が立ち上がり、対話を続けた。",
+    }
+
+
 def _sections():
     return [
         {
@@ -47,6 +60,7 @@ def _sections():
                 {"block_id": "d1", "type": "dialogue", "text": "ありがとう。", "speaker_id": "c001"},
                 {"block_id": "d2", "type": "dialogue", "text": "どういうこと？", "speaker_id": "c001"},
             ],
+            "state_updates": _state_updates(),
         }
     ]
 
