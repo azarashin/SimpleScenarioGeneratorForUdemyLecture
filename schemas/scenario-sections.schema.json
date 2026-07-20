@@ -10,7 +10,8 @@
             "chapter_no",
             "section_no",
             "section_title",
-            "narrative_blocks"
+            "narrative_blocks",
+            "state_updates"
         ],
         "additionalProperties": false,
         "properties": {
@@ -100,6 +101,87 @@
                             }
                         }
                     ]
+                }
+            },
+            "state_updates": {
+                "type": "object",
+                "required": [
+                    "character_locations",
+                    "possessions",
+                    "known_information",
+                    "relationship_changes",
+                    "introduced_entities",
+                    "unresolved_plot_threads",
+                    "resolved_plot_threads",
+                    "continuity_summary"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "character_locations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["character_id", "location"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "character_id": {"$ref": "common.schema.json#/$defs/characterId"},
+                                "location": {
+                                    "oneOf": [
+                                        {"type": "null"},
+                                        {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "possessions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["character_id", "items"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "character_id": {"$ref": "common.schema.json#/$defs/characterId"},
+                                "items": {
+                                    "type": "array",
+                                    "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+                                }
+                            }
+                        }
+                    },
+                    "known_information": {
+                        "type": "array",
+                        "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+                    },
+                    "relationship_changes": {
+                        "type": "array",
+                        "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+                    },
+                    "introduced_entities": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["entity_id", "type", "name", "description"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "entity_id": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                                "type": {"enum": ["character", "location", "organization", "object", "concept"]},
+                                "name": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                                "description": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+                            }
+                        }
+                    },
+                    "unresolved_plot_threads": {
+                        "type": "array",
+                        "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+                    },
+                    "resolved_plot_threads": {
+                        "type": "array",
+                        "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+                    },
+                    "continuity_summary": {
+                        "$ref": "common.schema.json#/$defs/nonEmptyString"
+                    }
                 }
             }
         }

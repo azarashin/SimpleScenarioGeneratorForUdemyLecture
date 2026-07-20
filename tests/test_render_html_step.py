@@ -5,6 +5,19 @@ from pipeline.engine import StepExecutionEngine
 from pipeline.steps import RenderHtmlStep, build_minimal_steps
 
 
+def _state_updates():
+    return {
+        "character_locations": [],
+        "possessions": [],
+        "known_information": [],
+        "relationship_changes": [],
+        "introduced_entities": [],
+        "unresolved_plot_threads": [],
+        "resolved_plot_threads": [],
+        "continuity_summary": "葵が雨の中で出発を決めた。",
+    }
+
+
 def test_render_html_step_is_registered_after_dialogue_tags():
     assert [step.name for step in build_minimal_steps()][-2:] == [
         "step-05-generate-dialogue-tags",
@@ -54,6 +67,7 @@ def test_render_html_step_writes_pages_and_manifest(make_context):
                             "speaker_id": "c001",
                         }
                     ],
+                    "state_updates": _state_updates(),
                 }
             ],
             "dialogue_expression_tags": [
@@ -152,6 +166,7 @@ def test_render_html_step_auto_loads_generated_json_and_image_assets(make_contex
                             "speaker_id": "c001",
                         }
                     ],
+                    "state_updates": _state_updates(),
                 }
             ]
         },

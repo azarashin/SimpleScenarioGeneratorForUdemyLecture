@@ -99,16 +99,36 @@ class GenerateOutlineStep(Step):
                     f"Develop the theme '{input_data['scenario_idea']['theme']}' "
                     f"through story phase {phase}"
                 )
+                key_events = [
+                    f"phase-{phase}-conflict emerges",
+                    f"phase-{phase}-choice changes the situation",
+                    f"phase-{phase}-consequence points forward",
+                ]
+                subsection_count = (
+                    context.config.scenario_body_generation.subsections_per_section
+                )
+                subsections = [
+                    {
+                        "subsection_no": subsection_no,
+                        "subsection_title": f"Beat {chapter_no}-{section_no}-{subsection_no}",
+                        "subsection_purpose": (
+                            f"Advance {purpose} through beat {subsection_no} of "
+                            f"{subsection_count}"
+                        ),
+                        "key_events": self._events_for_subsection(
+                            key_events, subsection_count, subsection_no
+                        ),
+                    }
+                    for subsection_no in range(1, subsection_count + 1)
+                ]
                 sections.append(
                     {
                         "section_no": section_no,
                         "section_title": f"Section {chapter_no}-{section_no}",
                         "section_purpose": purpose,
-                        "key_events": [
-                            f"phase-{phase}-conflict emerges",
-                            f"phase-{phase}-choice changes the situation",
-                        ],
+                        "key_events": key_events,
                         "participating_characters": profile_ids,
+                        "subsections": subsections,
                     }
                 )
             chapters.append(
@@ -136,6 +156,19 @@ class GenerateOutlineStep(Step):
             input_tokens=180,
             output_tokens=360,
         )
+
+    @staticmethod
+    def _events_for_subsection(
+        events: list[str], count: int, subsection_no: int
+    ) -> list[str]:
+        assigned = [
+            event
+            for event_index, event in enumerate(events)
+            if event_index % count == subsection_no - 1
+        ]
+        if assigned:
+            return assigned
+        return [events[(subsection_no - 1) % len(events)]]
 
 
 class GenerateCharacterImagesStep(Step):
@@ -699,149 +732,297 @@ class GenerateSectionsStep(Step):
 
         for chapter in outline["chapters"]:
             for section in chapter["sections"]:
-                rendered_prompt = prompt_builder.build(
-                    scenario_idea=scenario_idea,
-                    character_profiles=character_profiles,
-                    chapter=chapter,
-                    section=section,
-                    previous_state=previous_state,
-                    min_characters=quality_config.min_characters,
-                    max_characters=quality_config.max_characters,
-                    min_dialogue_blocks=quality_config.min_dialogue_blocks,
-                    max_dialogue_blocks=quality_config.max_dialogue_blocks,
-                    version=requested_version,
+                merged_blocks: list[dict[str, Any]] = []
+                subsections = self._subsections_for(
+                    section, quality_config.subsections_per_section
                 )
-                rendered_prompts.append(rendered_prompt)
-                checkpoint_path = checkpoint_dir / (
-                    f"chapter-{chapter['chapter_no']:03d}-section-{section['section_no']:03d}.json"
-                )
-                checkpoint = self._load_checkpoint(
-                    checkpoint_path,
-                    rendered_prompt.rendered_hash,
-                    schema_validator,
-                    chapter,
-                    section,
-                    quality_checker,
-                    valid_character_ids,
-                    quality_config.min_characters,
-                    quality_config.max_characters,
-                    quality_config.min_dialogue_blocks,
-                    quality_config.max_dialogue_blocks,
-                    quality_config.require_event_mentions,
-                )
-                if checkpoint is not None:
-                    generated_section, state_after = checkpoint
-                    context.trace_logger.log(
-                        {
-                            "run_id": context.run_id,
-                            "step": self.name,
-                            "event": "section_checkpoint_loaded",
-                            "chapter_no": chapter["chapter_no"],
-                            "section_no": section["section_no"],
-                        }
+                for subsection in subsections:
+                    subsection_no = int(subsection["subsection_no"])
+                    target_section = {
+                        "section_no": section["section_no"],
+                        "section_title": section["section_title"],
+                        "section_purpose": subsection["subsection_purpose"],
+                        "key_events": subsection["key_events"],
+                        "participating_characters": section[
+                            "participating_characters"
+                        ],
+                    }
+                    rendered_prompt = prompt_builder.build(
+                        scenario_idea=scenario_idea,
+                        character_profiles=character_profiles,
+                        chapter=chapter,
+                        section=target_section,
+                        subsection=subsection,
+                        previous_state=previous_state,
+                        target_characters=quality_config.target_characters,
+                        min_characters=quality_config.min_characters,
+                        max_characters=quality_config.max_characters,
+                        min_dialogue_blocks=quality_config.min_dialogue_blocks,
+                        max_dialogue_blocks=quality_config.max_dialogue_blocks,
+                        version=requested_version,
                     )
-                else:
-                    context.trace_logger.log(
-                        {
-                            "run_id": context.run_id,
-                            "step": self.name,
-                            "event": "section_generation_started",
-                            "chapter_no": chapter["chapter_no"],
-                            "section_no": section["section_no"],
-                        }
+                    rendered_prompts.append(rendered_prompt)
+                    checkpoint_name = (
+                        f"chapter-{chapter['chapter_no']:03d}-"
+                        f"section-{section['section_no']:03d}.json"
+                        if len(subsections) == 1
+                        else (
+                            f"chapter-{chapter['chapter_no']:03d}-"
+                            f"section-{section['section_no']:03d}-"
+                            f"subsection-{subsection_no:03d}.json"
+                        )
                     )
-                    generation_prompt = rendered_prompt.text
-                    if retry_feedback:
-                        generation_prompt += self._prompt_revision(retry_feedback)
-                    response = context.text_generation_provider.generate_json(
-                        prompt=generation_prompt,
-                        model=context.config.text_generation.model,
-                        temperature=context.config.temperature_for(self.name),
+                    checkpoint_path = checkpoint_dir / checkpoint_name
+                    checkpoint = self._load_checkpoint(
+                        checkpoint_path,
+                        rendered_prompt.rendered_hash,
+                        schema_validator,
+                        chapter,
+                        target_section,
+                        quality_checker,
+                        valid_character_ids,
+                        quality_config.min_characters,
+                        quality_config.max_characters,
+                        quality_config.min_dialogue_blocks,
+                        quality_config.max_dialogue_blocks,
+                        quality_config.require_event_mentions,
                     )
-                    schema_validator.validate(
-                        schema_name=self.schema_name,
-                        section="output",
-                        instance=response.data,
-                    )
-                    generated_sections = response.data["scenario_sections"]
-                    if len(generated_sections) != 1:
-                        raise ValueError("Section generation must return exactly one section")
-                    generated_section = generated_sections[0]
-                    self._validate_target(generated_section, chapter, section)
-                    try:
-                        quality_checker.check_section(
+                    if checkpoint is not None:
+                        generated_section, state_after = checkpoint
+                        context.trace_logger.log(
+                            {
+                                "run_id": context.run_id,
+                                "step": self.name,
+                                "event": (
+                                    "section_checkpoint_loaded"
+                                    if len(subsections) == 1
+                                    else "subsection_checkpoint_loaded"
+                                ),
+                                "chapter_no": chapter["chapter_no"],
+                                "section_no": section["section_no"],
+                                "subsection_no": subsection_no,
+                            }
+                        )
+                    else:
+                        context.trace_logger.log(
+                            {
+                                "run_id": context.run_id,
+                                "step": self.name,
+                                "event": "subsection_generation_started",
+                                "chapter_no": chapter["chapter_no"],
+                                "section_no": section["section_no"],
+                                "subsection_no": subsection_no,
+                            }
+                        )
+                        generation_prompt = rendered_prompt.text
+                        if retry_feedback:
+                            generation_prompt += self._prompt_revision(retry_feedback)
+                        response = context.text_generation_provider.generate_json(
+                            prompt=generation_prompt,
+                            model=context.config.text_generation.model,
+                            temperature=context.config.temperature_for(self.name),
+                        )
+                        schema_validator.validate(
+                            schema_name=self.schema_name,
+                            section="output",
+                            instance=response.data,
+                        )
+                        if len(response.data["scenario_sections"]) != 1:
+                            raise ValueError(
+                                "Subsection generation must return exactly one section"
+                            )
+                        generated_section = response.data["scenario_sections"][0]
+                        self._validate_target(generated_section, chapter, section)
+                        self._normalize_block_ids(
+                            generated_section,
+                            chapter_no=chapter["chapter_no"],
+                            section_no=section["section_no"],
+                            subsection_no=subsection_no,
+                        )
+                        repair_input_tokens = 0
+                        repair_output_tokens = 0
+                        try:
+                            quality_checker.check_section(
+                                generated_section=generated_section,
+                                outline_section=target_section,
+                                valid_character_ids=valid_character_ids,
+                                min_characters=quality_config.min_characters,
+                                max_characters=quality_config.max_characters,
+                                min_dialogue_blocks=quality_config.min_dialogue_blocks,
+                                max_dialogue_blocks=quality_config.max_dialogue_blocks,
+                                require_event_mentions=quality_config.require_event_mentions,
+                            )
+                        except ValueError as exc:
+                            metrics = self._section_metrics(generated_section)
+                            if self._is_under_length_error(
+                                exc,
+                                metrics["non_whitespace_characters"],
+                                quality_config.min_characters,
+                            ):
+                                context.trace_logger.log(
+                                    {
+                                        "run_id": context.run_id,
+                                        "step": self.name,
+                                        "event": "subsection_supplement_started",
+                                        "chapter_no": chapter["chapter_no"],
+                                        "section_no": section["section_no"],
+                                        "subsection_no": subsection_no,
+                                        "current_characters": metrics[
+                                            "non_whitespace_characters"
+                                        ],
+                                        "minimum_characters": quality_config.min_characters,
+                                    }
+                                )
+                                try:
+                                    repair_response = (
+                                        context.text_generation_provider.generate_json(
+                                            prompt=self._supplement_prompt(
+                                                generation_prompt,
+                                                generated_section,
+                                                current_characters=metrics[
+                                                    "non_whitespace_characters"
+                                                ],
+                                                min_characters=quality_config.min_characters,
+                                                target_characters=quality_config.target_characters,
+                                                max_characters=quality_config.max_characters,
+                                            ),
+                                            model=context.config.text_generation.model,
+                                            temperature=context.config.temperature_for(
+                                                self.name
+                                            ),
+                                        )
+                                    )
+                                    schema_validator.validate(
+                                        schema_name=self.schema_name,
+                                        section="output",
+                                        instance=repair_response.data,
+                                    )
+                                    if len(repair_response.data["scenario_sections"]) != 1:
+                                        raise ValueError(
+                                            "Subsection supplement must return exactly one section"
+                                        )
+                                    repaired_section = repair_response.data[
+                                        "scenario_sections"
+                                    ][0]
+                                    self._validate_target(
+                                        repaired_section, chapter, section
+                                    )
+                                    self._normalize_block_ids(
+                                        repaired_section,
+                                        chapter_no=chapter["chapter_no"],
+                                        section_no=section["section_no"],
+                                        subsection_no=subsection_no,
+                                    )
+                                    quality_checker.check_section(
+                                        generated_section=repaired_section,
+                                        outline_section=target_section,
+                                        valid_character_ids=valid_character_ids,
+                                        min_characters=quality_config.min_characters,
+                                        max_characters=quality_config.max_characters,
+                                        min_dialogue_blocks=quality_config.min_dialogue_blocks,
+                                        max_dialogue_blocks=quality_config.max_dialogue_blocks,
+                                        require_event_mentions=quality_config.require_event_mentions,
+                                    )
+                                except ValueError as repair_exc:
+                                    exc = repair_exc
+                                    context.trace_logger.log(
+                                        {
+                                            "run_id": context.run_id,
+                                            "step": self.name,
+                                            "event": "subsection_supplement_failed",
+                                            "chapter_no": chapter["chapter_no"],
+                                            "section_no": section["section_no"],
+                                            "subsection_no": subsection_no,
+                                            "failure_reason": str(repair_exc),
+                                        }
+                                    )
+                                else:
+                                    generated_section = repaired_section
+                                    repair_input_tokens = repair_response.input_tokens or 0
+                                    repair_output_tokens = repair_response.output_tokens or 0
+                                    context.trace_logger.log(
+                                        {
+                                            "run_id": context.run_id,
+                                            "step": self.name,
+                                            "event": "subsection_supplement_succeeded",
+                                            "chapter_no": chapter["chapter_no"],
+                                            "section_no": section["section_no"],
+                                            "subsection_no": subsection_no,
+                                            "metrics": self._section_metrics(
+                                                generated_section
+                                            ),
+                                        }
+                                    )
+                                    exc = None
+                            if exc is None:
+                                pass
+                            else:
+                                self._write_rejected(
+                                    checkpoint_path,
+                                    generated_section,
+                                    exc,
+                                    quality_config,
+                                )
+                                context.trace_logger.log(
+                                    {
+                                        "run_id": context.run_id,
+                                        "step": self.name,
+                                        "event": "section_validation_failed",
+                                        "chapter_no": chapter["chapter_no"],
+                                        "section_no": section["section_no"],
+                                        "subsection_no": subsection_no,
+                                        "failure_reason": str(exc),
+                                        "metrics": self._section_metrics(generated_section),
+                                        "rejected_path": str(
+                                            checkpoint_path.with_name(
+                                                f"{checkpoint_path.stem}.rejected.json"
+                                            )
+                                        ),
+                                    }
+                                )
+                                raise exc
+                        state_after = advance_scenario_state(
+                            previous_state,
+                            chapter_no=chapter["chapter_no"],
+                            outline_section=target_section,
                             generated_section=generated_section,
-                            outline_section=section,
-                            valid_character_ids=valid_character_ids,
-                            min_characters=quality_config.min_characters,
-                            max_characters=quality_config.max_characters,
-                            min_dialogue_blocks=quality_config.min_dialogue_blocks,
-                            max_dialogue_blocks=quality_config.max_dialogue_blocks,
-                            require_event_mentions=quality_config.require_event_mentions,
                         )
-                    except ValueError as exc:
-                        rejected_path = checkpoint_path.with_name(
-                            f"{checkpoint_path.stem}.rejected.json"
-                        )
-                        rejected_path.parent.mkdir(parents=True, exist_ok=True)
-                        metrics = self._section_metrics(generated_section)
-                        rejected_path.write_text(
-                            json.dumps(
-                                {
-                                    "failure_reason": str(exc),
-                                    "metrics": metrics,
-                                    "required": {
-                                        "min_characters": quality_config.min_characters,
-                                        "max_characters": quality_config.max_characters,
-                                        "min_dialogue_blocks": quality_config.min_dialogue_blocks,
-                                        "max_dialogue_blocks": quality_config.max_dialogue_blocks,
-                                    },
-                                    "section": generated_section,
-                                },
-                                ensure_ascii=False,
-                                indent=2,
-                            ),
-                            encoding="utf-8",
+                        self._write_checkpoint(
+                            checkpoint_path,
+                            rendered_prompt.rendered_hash,
+                            generated_section,
+                            state_after,
                         )
                         context.trace_logger.log(
                             {
                                 "run_id": context.run_id,
                                 "step": self.name,
-                                "event": "section_validation_failed",
+                                "event": (
+                                    "section_generated"
+                                    if len(subsections) == 1
+                                    else "subsection_generated"
+                                ),
                                 "chapter_no": chapter["chapter_no"],
                                 "section_no": section["section_no"],
-                                "failure_reason": str(exc),
-                                "metrics": metrics,
-                                "rejected_path": str(rejected_path),
+                                "subsection_no": subsection_no,
+                                "checkpoint_path": str(checkpoint_path),
                             }
                         )
-                        raise
-                    state_after = advance_scenario_state(
-                        previous_state,
-                        chapter_no=chapter["chapter_no"],
-                        outline_section=section,
-                        generated_section=generated_section,
-                    )
-                    self._write_checkpoint(
-                        checkpoint_path,
-                        rendered_prompt.rendered_hash,
-                        generated_section,
-                        state_after,
-                    )
-                    input_tokens += response.input_tokens or 0
-                    output_tokens += response.output_tokens or 0
-                    context.trace_logger.log(
-                        {
-                            "run_id": context.run_id,
-                            "step": self.name,
-                            "event": "section_generated",
-                            "chapter_no": chapter["chapter_no"],
-                            "section_no": section["section_no"],
-                            "checkpoint_path": str(checkpoint_path),
-                        }
-                    )
-                sections_out.append(generated_section)
-                previous_state = state_after
+                        input_tokens += response.input_tokens or 0
+                        output_tokens += response.output_tokens or 0
+                        input_tokens += repair_input_tokens
+                        output_tokens += repair_output_tokens
+                    merged_blocks.extend(generated_section["narrative_blocks"])
+                    previous_state = state_after
+                sections_out.append(
+                    {
+                        "chapter_no": chapter["chapter_no"],
+                        "section_no": section["section_no"],
+                        "section_title": section["section_title"],
+                        "narrative_blocks": merged_blocks,
+                        "state_updates": generated_section["state_updates"],
+                    }
+                )
 
         prompt = rendered_prompts[0]
 
@@ -855,9 +1036,77 @@ class GenerateSectionsStep(Step):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             metadata={
-                "section_prompt_count": len(rendered_prompts),
+                "section_prompt_count": len(sections_out),
+                "subsection_prompt_count": len(rendered_prompts),
                 "section_checkpoint_dir": str(checkpoint_dir),
+                "target_characters": quality_config.target_characters,
+                "accepted_character_range": [
+                    quality_config.min_characters,
+                    quality_config.max_characters,
+                ],
             },
+        )
+
+    @staticmethod
+    def _subsections_for(
+        section: dict[str, Any], count: int
+    ) -> list[dict[str, Any]]:
+        existing = section.get("subsections")
+        if existing and len(existing) == count:
+            return existing
+        events = section["key_events"]
+        return [
+            {
+                "subsection_no": index,
+                "subsection_title": f"Beat {section['section_no']}-{index}",
+                "subsection_purpose": (
+                    f"{section['section_purpose']} (beat {index} of {count})"
+                ),
+                "key_events": GenerateOutlineStep._events_for_subsection(
+                    events, count, index
+                ),
+            }
+            for index in range(1, count + 1)
+        ]
+
+    @staticmethod
+    def _normalize_block_ids(
+        section: dict[str, Any], *, chapter_no: int, section_no: int, subsection_no: int
+    ) -> None:
+        for index, block in enumerate(section["narrative_blocks"], start=1):
+            block["block_id"] = (
+                f"b-{chapter_no}-{section_no}-{subsection_no}-{index:03d}"
+            )
+
+    def _write_rejected(
+        self,
+        checkpoint_path: Path,
+        generated_section: dict[str, Any],
+        error: Exception,
+        quality_config: Any,
+    ) -> None:
+        rejected_path = checkpoint_path.with_name(
+            f"{checkpoint_path.stem}.rejected.json"
+        )
+        rejected_path.parent.mkdir(parents=True, exist_ok=True)
+        rejected_path.write_text(
+            json.dumps(
+                {
+                    "failure_reason": str(error),
+                    "metrics": self._section_metrics(generated_section),
+                    "required": {
+                        "target_characters": quality_config.target_characters,
+                        "min_characters": quality_config.min_characters,
+                        "max_characters": quality_config.max_characters,
+                        "min_dialogue_blocks": quality_config.min_dialogue_blocks,
+                        "max_dialogue_blocks": quality_config.max_dialogue_blocks,
+                    },
+                    "section": generated_section,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
         )
 
     def _load_checkpoint(
@@ -906,7 +1155,10 @@ class GenerateSectionsStep(Step):
                 state_after,
                 expected_character_ids=valid_character_ids,
             )
-            if state_after["previous_section"] != section:
+            if state_after["current_section"] != {
+                "chapter_no": chapter["chapter_no"],
+                "section_no": target_section["section_no"],
+            }:
                 raise ValueError("Checkpoint state does not match its generated section")
         except (KeyError, TypeError, ValueError):
             return None
@@ -925,6 +1177,49 @@ class GenerateSectionsStep(Step):
             "dialogue_blocks": sum(block.get("type") == "dialogue" for block in blocks),
             "total_blocks": len(blocks),
         }
+
+    @staticmethod
+    def _is_under_length_error(
+        error: Exception, current_characters: int, min_characters: int
+    ) -> bool:
+        return (
+            current_characters < min_characters
+            and "body length must be" in str(error)
+        )
+
+    @staticmethod
+    def _supplement_prompt(
+        original_prompt: str,
+        generated_section: dict[str, Any],
+        *,
+        current_characters: int,
+        min_characters: int,
+        target_characters: int,
+        max_characters: int,
+    ) -> str:
+        desired_characters = min(
+            max_characters,
+            max(target_characters, min_characters + 150),
+        )
+        minimum_addition = min_characters - current_characters
+        return (
+            f"{original_prompt}\n\n"
+            "SUPPLEMENTAL EXPANSION PHASE\n"
+            "The previous JSON is structurally valid but its body is too short. "
+            "Revise that existing section instead of replacing its story with a "
+            "different scene. Preserve established facts, event order, speakers, "
+            "and the intent of existing dialogue. Add useful reactions, actions, "
+            "causal consequences, and transition details; do not pad with repetition "
+            "or one long monologue.\n"
+            f"Current length: {current_characters} non-whitespace characters.\n"
+            f"At least {minimum_addition} additional characters are required.\n"
+            f"Aim for {desired_characters} total characters and remain within "
+            f"{min_characters}-{max_characters}.\n"
+            "Return only the complete revised JSON object using the original output "
+            "schema.\n\n"
+            "PREVIOUS GENERATED JSON\n"
+            f"{json.dumps({'scenario_sections': [generated_section]}, ensure_ascii=False, indent=2)}"
+        )
 
     @staticmethod
     def _prompt_revision(failure_reason: str) -> str:

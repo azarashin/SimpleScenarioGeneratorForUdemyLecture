@@ -204,14 +204,25 @@ class StepExecutionEngine:
                         ),
                     },
                     "_scenario_body_generation_config": {
+                        "target_characters": (
+                            context.config.scenario_body_generation.target_characters
+                        ),
                         "min_characters": (
                             context.config.scenario_body_generation.min_characters
+                            * context.config.scenario_body_generation.subsections_per_section
                         ),
                         "max_characters": (
                             context.config.scenario_body_generation.max_characters
+                            * context.config.scenario_body_generation.subsections_per_section
                         ),
-                        "min_dialogue_blocks": context.config.scenario_body_generation.min_dialogue_blocks,
-                        "max_dialogue_blocks": context.config.scenario_body_generation.max_dialogue_blocks,
+                        "min_dialogue_blocks": (
+                            context.config.scenario_body_generation.min_dialogue_blocks
+                            * context.config.scenario_body_generation.subsections_per_section
+                        ),
+                        "max_dialogue_blocks": (
+                            context.config.scenario_body_generation.max_dialogue_blocks
+                            * context.config.scenario_body_generation.subsections_per_section
+                        ),
                         "require_event_mentions": (
                             context.config.scenario_body_generation.require_event_mentions
                         ),
