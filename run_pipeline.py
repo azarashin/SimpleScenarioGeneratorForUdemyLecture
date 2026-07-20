@@ -77,7 +77,10 @@ def main() -> None:
     )
 
     engine = StepExecutionEngine(
-        build_minimal_steps(include_planning_input_generation=not is_structured_input)
+        build_minimal_steps(
+            include_planning_input_generation=not is_structured_input,
+            include_scenario_review=config.scenario_review.enabled,
+        )
     )
     output = engine.run(
         context,

@@ -118,6 +118,14 @@ class ScenarioSectionPromptBuilder:
             "stage it again.\n"
             "- Use at most one brief transition sentence to connect from recent_context; "
             "spend the remaining text on new action, information, choice, or consequence."
+            "\n- TARGET SUBSECTION.planned_state_updates is a binding prose contract. "
+            "Make every listed location, possession, fact, relationship change, entity, "
+            "thread transition, clue transition, and character-arc change observably true "
+            "by the end. Reflect durable results in state_updates; do not merely mention "
+            "the planning labels."
+            "\n- PREVIOUS SECTION STATE OR SUMMARY.plan_progress records already executed "
+            "outline commitments. Never re-plant a planted clue, reopen a completed event, "
+            "or repeat a character turning point."
         )
         try:
             text = Template(template_text).substitute(variables)

@@ -95,6 +95,10 @@ def test_scenario_state_merges_durable_updates_into_compact_state() -> None:
         "They reached the sealed archive with a new map."
     )
     assert state["current_subsection"] == 1
+    assert state["plan_progress"]["completed_event_ids"] == [
+        "phase-1-beat-1"
+    ]
+    assert state["plan_progress"]["last_planned_state_summary"] is None
 
 
 def test_scenario_state_rejects_updates_for_unknown_characters() -> None:
@@ -146,6 +150,10 @@ def test_section_checkpoint_state_is_restored_and_passed_to_next_prompt(
     ]
     assert state["current_subsection"] == 1
     assert len(state["occurred_events"]) == 1
+    assert state["plan_progress"]["completed_event_ids"] == [
+        "phase-1-beat-1"
+    ]
+    assert state["plan_progress"]["last_planned_state_summary"]
     assert "character_locations" in provider.requests[1].prompt
     assert payload["section"]["narrative_blocks"][0]["text"] not in (
         provider.requests[1].prompt

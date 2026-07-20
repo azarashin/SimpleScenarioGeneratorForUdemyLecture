@@ -371,6 +371,23 @@ def test_openai_provider_accepts_step_specific_response_schema() -> None:
     assert response_format["schema"] == schema
 
 
+def test_openai_provider_omits_temperature_for_gpt_5_6() -> None:
+    responses = FakeResponsesClient('{"scenario_sections": []}')
+    provider = OpenAITextGenerationProvider(
+        api_key="not-used-by-fake",
+        timeout_seconds=30,
+        client=SimpleNamespace(responses=responses),
+    )
+
+    provider.generate_json(
+        prompt="generate",
+        model="gpt-5.6-luna",
+        temperature=0.2,
+    )
+
+    assert "temperature" not in responses.calls[0]
+
+
 def test_openai_provider_rejects_non_json_output() -> None:
     provider = OpenAITextGenerationProvider(
         api_key="not-used-by-fake",

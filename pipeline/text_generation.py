@@ -289,11 +289,10 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
         response_schema: dict[str, Any] | None = None,
         response_name: str = "scenario_section_response",
     ) -> GenerationResponse:
-        response = self.client.responses.create(
-            model=model,
-            input=prompt,
-            temperature=temperature,
-            text={
+        request: dict[str, Any] = {
+            "model": model,
+            "input": prompt,
+            "text": {
                 "format": {
                     "type": "json_schema",
                     "name": response_name,
@@ -301,7 +300,10 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
                     "schema": response_schema or _scenario_section_response_schema(),
                 }
             },
-        )
+        }
+        if _supports_temperature(model):
+            request["temperature"] = temperature
+        response = self.client.responses.create(**request)
         data = parse_llm_json_object(response.output_text)
         usage = getattr(response, "usage", None)
         return GenerationResponse(
@@ -314,6 +316,11 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
                 "response_id": getattr(response, "id", None),
             },
         )
+
+
+def _supports_temperature(model: str) -> bool:
+    """Return whether the Responses API model accepts sampling temperature."""
+    return not model.casefold().startswith("gpt-5.6")
 
 
 def _scenario_section_response_schema() -> dict[str, Any]:

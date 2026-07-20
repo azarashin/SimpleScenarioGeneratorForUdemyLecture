@@ -16,6 +16,7 @@ from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyCheck
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
 from pipeline.prompt_impact import PromptImpactReporter
 from pipeline.prompts import PromptCatalog
+from pipeline.scenario_review import ReviewOutlineStep, _inline_common_refs
 from pipeline.steps import (
     GeneratePlanningInputStep,
     GenerateCharacterProfilesStep,
@@ -280,6 +281,99 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     assert conf.character_profile_generation.require_review is True
     assert conf.planning_input_generation.enabled is False
     assert conf.planning_input_generation.require_review is True
+    assert conf.scenario_review.enabled is False
+    assert conf.scenario_review.require_human_review is False
+
+
+def test_scenario_review_can_be_enabled(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "scenario_review": {
+                    "enabled": True,
+                    "require_human_review": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    conf = load_config(str(cfg_path))
+
+    assert conf.scenario_review.enabled is True
+    assert conf.scenario_review.require_human_review is True
+
+
+def test_openai_example_uses_manageable_outline_subsection_count() -> None:
+    config_path = (
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "pipeline.openai.config.json"
+    )
+
+    conf = load_config(str(config_path))
+
+    assert conf.scenario_body_generation.subsections_per_section == 3
+
+
+def test_review_steps_are_inserted_around_generation() -> None:
+    names = [
+        step.name for step in build_minimal_steps(include_scenario_review=True)
+    ]
+
+    assert names.index("step-02-review-outline") == names.index(
+        "step-02-generate-outline"
+    ) + 1
+    assert names.index("step-04-review-sections") == names.index(
+        "step-04-generate-sections"
+    ) + 1
+
+
+def test_outline_review_api_schema_has_no_unresolved_refs() -> None:
+    schemas_dir = Path(__file__).resolve().parent.parent / "schemas"
+    outline_schema = json.loads(
+        (schemas_dir / "scenario-outline.schema.json").read_text(encoding="utf-8")
+    )
+
+    api_schema = _inline_common_refs(outline_schema, schemas_dir)
+
+    assert '"$ref"' not in json.dumps(api_schema)
+    story_event = api_schema["properties"]["chapters"]["items"]["properties"][
+        "sections"
+    ]["items"]["properties"]["key_events"]["items"]
+    assert story_event["required"] == ["event_id", "description"]
+
+    def assert_strict_objects(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                assert_strict_objects(item)
+            return
+        if not isinstance(value, dict):
+            return
+        properties = value.get("properties")
+        if isinstance(properties, dict):
+            assert value.get("required") == list(properties)
+            assert value.get("additionalProperties") is False
+        for item in value.values():
+            assert_strict_objects(item)
+
+    assert_strict_objects(api_schema)
+
+
+def test_outline_review_restores_immutable_title_and_logline() -> None:
+    reviewed = ReviewOutlineStep._restore_immutable_fields(
+        {
+            "title": "Paraphrased title",
+            "logline": "Paraphrased premise",
+            "story_plan": {},
+            "chapters": [],
+        },
+        {"title": "Canonical title", "premise": "Canonical premise"},
+    )
+
+    assert reviewed["title"] == "Canonical title"
+    assert reviewed["logline"] == "Canonical premise"
 
 
 def test_scenario_body_length_can_be_overridden(tmp_path: Path) -> None:
@@ -389,6 +483,7 @@ def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
     assert "scenario_outline" in output
     assert "character_image_assets" in output
     assert "scenario_sections" in output
+    assert "story_plan" in output["scenario_outline"]
 
     outline_sections = [
         section
@@ -404,6 +499,11 @@ def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
             for section in outline_sections
         }
     ) == len(outline_sections)
+    assert all(
+        "planned_state_updates" in subsection
+        for section in outline_sections
+        for subsection in section["subsections"]
+    )
 
 
 def test_scenario_body_quality_checks_length_and_required_events(make_context) -> None:
@@ -456,6 +556,26 @@ def test_scenario_body_quality_checks_length_and_required_events(make_context) -
             {"scenario_sections": missing_event_output["scenario_sections"]},
         )
 
+
+def test_outline_rejects_foreshadow_payoff_before_plant(make_context) -> None:
+    context, _ = make_context()
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+    outline = deepcopy(output["scenario_outline"])
+    event_id = outline["chapters"][0]["sections"][0]["key_events"][0]["event_id"]
+    outline["story_plan"]["foreshadowing"] = [
+        {
+            "clue_id": "clue-1",
+            "description": "A clue with an impossible lifecycle.",
+            "plant_event_id": event_id,
+            "payoff_event_id": event_id,
+        }
+    ]
+
+    with pytest.raises(ConsistencyCheckError, match="must pay off after"):
+        PipelineConsistencyChecker().check(
+            context.shared_data,
+            {"scenario_outline": outline},
+        )
 
 def test_mock_section_generation_advances_without_replaying_previous_event(make_context) -> None:
     context, _ = make_context()

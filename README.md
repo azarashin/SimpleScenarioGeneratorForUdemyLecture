@@ -16,12 +16,14 @@ flowchart TD
     REVIEW -->|修正する| ARTIFACT[Step 01成果物を編集]
     ARTIFACT --> REVIEW
     REVIEW -->|承認してStep 02から再開| S02[Step 02<br/>章・節・サブセクションのアウトライン生成]
-    S02 --> S03[Step 03<br/>基準画像・表情画像生成]
+    S02 --> PLAN[(物語設計台帳<br/>状態遷移・伏線・人物アーク)]
+    PLAN --> OREVIEW[Step 02 Review<br/>構成評価・アウトライン修正]
+    OREVIEW --> S03[Step 03<br/>基準画像・表情画像生成]
     S03 --> INIT[Step 04<br/>累積状態を初期化]
     INIT --> STATE
     INIT --> TARGET[次のサブセクションを選択]
 
-    STATE[(累積シナリオ状態 v3)] --> PROMPT[本文プロンプト構築]
+    STATE[(累積シナリオ状態 v4<br/>実績状態・計画進捗)] --> PROMPT[本文プロンプト構築]
     TARGET --> PROMPT
     PROMPT --> GENERATE[サブセクション本文と<br/>state_updatesを生成]
     GENERATE --> CHECK{スキーマ・整合性・<br/>品質検証}
@@ -39,7 +41,8 @@ flowchart TD
     UPDATE --> MORE{未生成の<br/>サブセクションがあるか}
     MORE -->|ある| TARGET
     MORE -->|ない| MERGE[サブセクションを<br/>節本文へ結合]
-    MERGE --> S05[Step 05<br/>セリフ表情タグ生成]
+    MERGE --> SREVIEW[Step 04 Review<br/>節全体の評価・修正]
+    SREVIEW --> S05[Step 05<br/>セリフ表情タグ生成]
     S05 --> S06[Step 06<br/>HTML生成・リンクと画像パス検証]
     S06 --> OUTPUT[output/run-id/index.html 以下]
 
@@ -54,16 +57,49 @@ flowchart TD
     classDef data fill:#dcfce7,stroke:#16a34a,color:#052e16,stroke-width:1.5px
 
     class INPUT_REVIEW,INPUT_ARTIFACT,REVIEW,ARTIFACT,LEGEND_HUMAN human
-    class S00,S01,S02,S03,INIT,TARGET,PROMPT,GENERATE,CHECK,UPDATE,SUPPLEMENT,RECHECK,RETRY,FAILED,MORE,MERGE,S05,S06,LEGEND_PROCESS process
-    class IDEA,INPUT,STATE,OUTPUT,LEGEND_DATA data
+    class S00,S01,S02,OREVIEW,S03,INIT,TARGET,PROMPT,GENERATE,CHECK,UPDATE,SUPPLEMENT,RECHECK,RETRY,FAILED,MORE,MERGE,SREVIEW,S05,S06,LEGEND_PROCESS process
+    class IDEA,INPUT,PLAN,STATE,OUTPUT,LEGEND_DATA data
 ```
 
 黄色は人間による確認・承認・編集、青色はパイプラインが自動実行する処理・判定、緑色は入力・
 累積状態・生成成果物などのデータを表します。
 
+Step 02 のアウトラインは、場面の順序だけでなく `story_plan` にプロットスレッド、伏線、
+人物アークを保持します。各サブセクションの `planned_state_updates` は、本文で実現すべき
+現在地、所持品、判明事項、関係変化、登場要素、伏線の提示・回収などを定義する契約です。
+Step 02 Review は参照IDと時系列を検証し、Step 04 は実行済みの計画だけを
+`state_after.plan_progress` に圧縮して次の生成単位へ渡します。
+
 Step 04では、過去の本文全文を次のプロンプトへ連結しません。各サブセクションが返す
 `state_updates`を累積状態へ反映し、現在地、所持品、判明事項、関係変化、登場済みの
 エンティティ、未解決の伏線、直近状況の要約を次の生成へ渡します。
+
+## シナリオの自動評価と修正
+
+`scenario_review.enabled=true`にすると、アウトライン生成直後と節本文の結合直後に生成AIによる
+評価・修正ステップを挿入します。
+
+```json
+{
+  "scenario_review": {
+    "enabled": true,
+    "require_human_review": false
+  }
+}
+```
+
+アウトライン評価では企画上の事件順、登場時期、必須事項、抽象的・重複したイベントを検査し、
+イベントIDと章節数を維持したまま具体的な出来事へ修正します。完成シナリオ評価では節全体を読み、
+時系列、話者、人物らしさ、反復、場面進行、内部指示の混入、設定上の妥当性を検査して修正版を
+出力します。評価結果は次の成果物に保存されます。
+
+- `artifacts/step-02-review-outline.json`
+- `artifacts/step-04-review-sections.json`
+
+本文評価で原因がアウトラインにあると判定された場合は、自動的に曖昧な部分だけを隠して進まず、
+Step 04 Reviewを失敗させます。評価内容を確認し、Step 02から再実行してください。
+`require_human_review=true`の場合は各レビューステップの成功後に停止し、成果物を人間が確認してから
+次のステップへ進めます。レビューは生成AI呼び出しを増やすため、処理時間とAPI利用量も増加します。
 
 ## 関連ドキュメント
 

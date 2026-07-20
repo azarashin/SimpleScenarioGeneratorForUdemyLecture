@@ -53,6 +53,12 @@ class ScenarioBodyGenerationConfig:
 
 
 @dataclass(slots=True)
+class ScenarioReviewConfig:
+    enabled: bool = False
+    require_human_review: bool = False
+
+
+@dataclass(slots=True)
 class RetryStrategyConfig:
     short_retries: int = 1
     prompt_revision_retries: int = 1
@@ -86,6 +92,7 @@ class AppConfig:
     scenario_body_generation: ScenarioBodyGenerationConfig = field(
         default_factory=ScenarioBodyGenerationConfig
     )
+    scenario_review: ScenarioReviewConfig = field(default_factory=ScenarioReviewConfig)
     retry_strategy: RetryStrategyConfig = field(default_factory=RetryStrategyConfig)
     temperature_policy: TemperaturePolicyConfig = field(
         default_factory=TemperaturePolicyConfig
@@ -160,6 +167,10 @@ def _to_default_dict() -> dict[str, Any]:
                 DEFAULT_CONFIG.scenario_body_generation.require_event_mentions
             ),
         },
+        "scenario_review": {
+            "enabled": DEFAULT_CONFIG.scenario_review.enabled,
+            "require_human_review": DEFAULT_CONFIG.scenario_review.require_human_review,
+        },
         "image_generation": {
             "provider": DEFAULT_CONFIG.image_generation.provider,
             "model": DEFAULT_CONFIG.image_generation.model,
@@ -194,6 +205,7 @@ def load_config(config_path: str | None) -> AppConfig:
     body_conf = merged.get("scenario_body_generation", {})
     profile_generation_conf = merged.get("character_profile_generation", {})
     planning_generation_conf = merged.get("planning_input_generation", {})
+    review_conf = merged.get("scenario_review", {})
     retry_conf = merged.get("retry_strategy", {})
     temperature_conf = merged.get("temperature_policy", {})
     image_provider = str(image_conf.get("provider", "")).strip()
@@ -327,6 +339,10 @@ def load_config(config_path: str | None) -> AppConfig:
             min_dialogue_blocks=min_dialogue_blocks,
             max_dialogue_blocks=max_dialogue_blocks,
             require_event_mentions=bool(body_conf.get("require_event_mentions", True)),
+        ),
+        scenario_review=ScenarioReviewConfig(
+            enabled=bool(review_conf.get("enabled", False)),
+            require_human_review=bool(review_conf.get("require_human_review", False)),
         ),
         retry_strategy=RetryStrategyConfig(
             short_retries=short_retries,

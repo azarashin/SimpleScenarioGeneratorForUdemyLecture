@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/step-02-review-outline.schema.json",
+  "title": "Step 02 Review Outline Contract",
+  "type": "object",
+  "required": ["input", "output"],
+  "additionalProperties": false,
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": ["scenario_idea", "character_profiles", "scenario_outline"],
+      "additionalProperties": false,
+      "properties": {
+        "scenario_idea": {"$ref": "input.schema.json#/properties/scenario_idea"},
+        "character_profiles": {"$ref": "character-profiles.schema.json"},
+        "scenario_outline": {"$ref": "scenario-outline.schema.json"}
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["scenario_outline", "outline_review_report"],
+      "additionalProperties": false,
+      "properties": {
+        "scenario_outline": {"$ref": "scenario-outline.schema.json"},
+        "outline_review_report": {"$ref": "scenario-review-report.schema.json"}
+      }
+    }
+  }
+}

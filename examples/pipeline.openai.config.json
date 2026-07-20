@@ -14,7 +14,7 @@
         "require_review": true
     },
     "scenario_body_generation": {
-        "subsections_per_section": 12,
+        "subsections_per_section": 3,
         "target_characters": 1200,
         "min_characters": 1000,
         "max_characters": 1600,

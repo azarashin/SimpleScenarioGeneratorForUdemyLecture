@@ -19,6 +19,16 @@ def _state_updates():
     }
 
 
+def _story_plan():
+    return {
+        "initial_state_summary": "葵はまだ旅に出ていない。",
+        "final_state_goal": "葵が協力者と旅を始める。",
+        "plot_threads": [],
+        "foreshadowing": [],
+        "character_arcs": [],
+    }
+
+
 def test_render_html_step_is_registered_after_dialogue_tags():
     assert [step.name for step in build_minimal_steps()][-2:] == [
         "step-05-generate-dialogue-tags",
@@ -38,6 +48,7 @@ def test_render_html_step_writes_pages_and_manifest(make_context):
             "scenario_outline": {
                 "title": "物語",
                 "logline": "二人の物語",
+                "story_plan": _story_plan(),
                 "chapters": [
                     {
                         "chapter_no": 1,
@@ -129,6 +140,7 @@ def test_render_html_step_auto_loads_generated_json_and_image_assets(make_contex
             "scenario_outline": {
                 "title": "物語",
                 "logline": "二人の物語",
+                "story_plan": _story_plan(),
                 "chapters": [
                     {
                         "chapter_no": 1,

@@ -404,6 +404,22 @@ class GenerateOutlineStep(Step):
                                     "the next section state."
                                 )
                             ),
+                            "planned_state_updates": {
+                                "character_locations": [],
+                                "possessions": [],
+                                "known_information": [event["description"]],
+                                "relationship_changes": [],
+                                "introduced_entities": [],
+                                "opened_thread_ids": [],
+                                "resolved_thread_ids": [],
+                                "planted_clue_ids": [],
+                                "paid_off_clue_ids": [],
+                                "character_arc_changes": [],
+                                "resulting_state_summary": (
+                                    f"After {event['description']} the story advances "
+                                    f"beyond beat {subsection_no}."
+                                ),
+                            },
                             "must_not_repeat": [
                                 "Do not restart the section introduction or repeat prior setup.",
                                 (
@@ -441,6 +457,16 @@ class GenerateOutlineStep(Step):
         outline = {
             "title": input_data["scenario_idea"]["title"],
             "logline": input_data["scenario_idea"]["premise"],
+            "story_plan": {
+                "initial_state_summary": input_data["scenario_idea"]["premise"],
+                "final_state_goal": (
+                    f"Resolve the central conflict while expressing the theme "
+                    f"'{input_data['scenario_idea']['theme']}'."
+                ),
+                "plot_threads": [],
+                "foreshadowing": [],
+                "character_arcs": [],
+            },
             "chapters": chapters,
         }
 
@@ -1263,6 +1289,9 @@ class GenerateSectionsStep(Step):
                         "participating_characters": section[
                             "participating_characters"
                         ],
+                        # Keep the active contract attached for compact plan-progress
+                        # accounting after the generated prose passes validation.
+                        "subsections": [subsection],
                     }
                     rendered_prompt = prompt_builder.build(
                         scenario_idea=scenario_idea,
@@ -1622,6 +1651,21 @@ class GenerateSectionsStep(Step):
                         "section state."
                     )
                 ),
+                "planned_state_updates": {
+                    "character_locations": [],
+                    "possessions": [],
+                    "known_information": [event["description"]],
+                    "relationship_changes": [],
+                    "introduced_entities": [],
+                    "opened_thread_ids": [],
+                    "resolved_thread_ids": [],
+                    "planted_clue_ids": [],
+                    "paid_off_clue_ids": [],
+                    "character_arc_changes": [],
+                    "resulting_state_summary": (
+                        f"The story has completed {event['description']}"
+                    ),
+                },
                 "must_not_repeat": [
                     "Do not restart prior setup.",
                     (
@@ -2143,7 +2187,11 @@ class RenderHtmlStep(Step):
         )
 
 
-def build_minimal_steps(*, include_planning_input_generation: bool = False) -> list[Step]:
+def build_minimal_steps(
+    *,
+    include_planning_input_generation: bool = False,
+    include_scenario_review: bool = False,
+) -> list[Step]:
     steps: list[Step] = [
         GenerateCharacterProfilesStep(),
         GenerateOutlineStep(),
@@ -2152,6 +2200,16 @@ def build_minimal_steps(*, include_planning_input_generation: bool = False) -> l
         GenerateDialogueTagsStep(),
         RenderHtmlStep(),
     ]
+    if include_scenario_review:
+        from .scenario_review import ReviewOutlineStep, ReviewSectionsStep
+
+        steps.insert(2, ReviewOutlineStep())
+        sections_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.name == "step-04-generate-sections"
+        )
+        steps.insert(sections_index + 1, ReviewSectionsStep())
     if include_planning_input_generation:
         steps.insert(0, GeneratePlanningInputStep())
     return steps
