@@ -382,6 +382,7 @@ class PipelineConsistencyChecker:
             "chapter timeline",
         )
         valid_characters = self._character_ids(data)
+        first_section_participants: set[str] | None = None
         for chapter in chapters:
             sections = chapter["sections"]
             self._require_sequence(
@@ -390,6 +391,14 @@ class PipelineConsistencyChecker:
                 f"chapter {chapter['chapter_no']} section timeline",
             )
             for section in sections:
+                participant_list = section["participating_characters"]
+                if len(participant_list) != len(set(participant_list)):
+                    self._fail(
+                        f"chapter {chapter['chapter_no']} section "
+                        f"{section['section_no']} contains duplicate participating characters"
+                    )
+                if first_section_participants is None:
+                    first_section_participants = set(participant_list)
                 unknown = set(section["participating_characters"]) - valid_characters
                 if unknown:
                     self._fail(
@@ -416,6 +425,14 @@ class PipelineConsistencyChecker:
                             f"{section['section_no']} subsections are missing events: "
                             f"{sorted(missing_events)}"
                         )
+        if (
+            len(valid_characters) >= 5
+            and first_section_participants == valid_characters
+        ):
+            self._fail(
+                "the first section must not introduce the entire cast when five or more "
+                "characters exist"
+            )
 
     def _check_sections(self, data: dict[str, Any]) -> None:
         outline_by_location = {

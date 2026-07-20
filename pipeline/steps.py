@@ -338,8 +338,13 @@ class GenerateOutlineStep(Step):
             context.shared_data,
             {"character_profiles": context.shared_data["character_profiles"]},
         )
-        profile_ids = [x["character_id"] for x in context.shared_data["character_profiles"]]
+        profiles = context.shared_data["character_profiles"]
         target = input_data["scenario_idea"]["target_length"]
+        participation = self._plan_participation(
+            profiles,
+            chapter_count=target["chapter_count"],
+            sections_per_chapter=target["sections_per_chapter"],
+        )
 
         chapters = []
         for chapter_no in range(1, target["chapter_count"] + 1):
@@ -378,7 +383,9 @@ class GenerateOutlineStep(Step):
                         "section_title": f"Section {chapter_no}-{section_no}",
                         "section_purpose": purpose,
                         "key_events": key_events,
-                        "participating_characters": profile_ids,
+                        "participating_characters": participation[
+                            (chapter_no, section_no)
+                        ],
                         "subsections": subsections,
                     }
                 )
@@ -420,6 +427,197 @@ class GenerateOutlineStep(Step):
         if assigned:
             return assigned
         return [events[(subsection_no - 1) % len(events)]]
+
+    @classmethod
+    def _plan_participation(
+        cls,
+        profiles: list[dict[str, Any]],
+        *,
+        chapter_count: int,
+        sections_per_chapter: int,
+    ) -> dict[tuple[int, int], list[str]]:
+        """Plan gradual character introductions and bounded scene casts."""
+        total_sections = chapter_count * sections_per_chapter
+        ordered_ids = [profile["character_id"] for profile in profiles]
+        profile_by_id = {profile["character_id"]: profile for profile in profiles}
+
+        protagonists = [
+            character_id
+            for character_id in ordered_ids
+            if cls._is_role(profile_by_id[character_id], "protagonist")
+        ]
+        if not protagonists:
+            protagonists = ordered_ids[:1]
+
+        companions = [
+            character_id
+            for character_id in ordered_ids
+            if character_id not in protagonists
+            and cls._is_role(profile_by_id[character_id], "companion")
+            and cls._chapter_scope(profile_by_id[character_id], chapter_count) is None
+        ]
+        core_ids = [*protagonists, *companions[:1]]
+        secondary_ids = [item for item in ordered_ids if item not in core_ids]
+        secondary_ids.sort(
+            key=lambda item: (
+                cls._role_priority(profile_by_id[item]),
+                ordered_ids.index(item),
+            )
+        )
+
+        introduction_slot: dict[str, int] = {item: 0 for item in core_ids}
+        unscoped = [
+            item
+            for item in secondary_ids
+            if cls._chapter_scope(profile_by_id[item], chapter_count) is None
+        ]
+        introduction_horizon = max(1, total_sections // 2)
+        for index, character_id in enumerate(unscoped):
+            introduction_slot[character_id] = 1 + (
+                index * max(1, introduction_horizon - 1) // max(1, len(unscoped))
+            )
+
+        for chapter_no in range(1, chapter_count + 1):
+            scoped = [
+                item
+                for item in secondary_ids
+                if (scope := cls._chapter_scope(profile_by_id[item], chapter_count))
+                is not None
+                and chapter_no in scope
+                and item not in introduction_slot
+            ]
+            for index, character_id in enumerate(scoped):
+                section_offset = (
+                    index * sections_per_chapter // max(1, len(scoped))
+                )
+                introduction_slot[character_id] = (
+                    (chapter_no - 1) * sections_per_chapter + section_offset
+                )
+
+        result: dict[tuple[int, int], list[str]] = {}
+        for slot in range(total_sections):
+            chapter_no = slot // sections_per_chapter + 1
+            section_no = slot % sections_per_chapter + 1
+            progress = slot / max(1, total_sections - 1)
+            if slot == 0:
+                cast_limit = 2
+            elif progress < 0.34:
+                cast_limit = 3
+            elif progress < 0.67:
+                cast_limit = 4
+            else:
+                cast_limit = 5
+
+            eligible = [
+                item
+                for item in ordered_ids
+                if introduction_slot.get(item, total_sections) <= slot
+                and cls._eligible_for_chapter(
+                    profile_by_id[item], chapter_no, chapter_count
+                )
+            ]
+            selected = [item for item in core_ids if item in eligible][:cast_limit]
+            newcomers = [
+                item
+                for item in eligible
+                if introduction_slot.get(item) == slot and item not in selected
+            ]
+            for character_id in newcomers:
+                if len(selected) >= cast_limit:
+                    break
+                selected.append(character_id)
+
+            rotating = [item for item in eligible if item not in selected]
+            if rotating:
+                offset = slot % len(rotating)
+                rotating = rotating[offset:] + rotating[:offset]
+            for character_id in rotating:
+                if len(selected) >= cast_limit:
+                    break
+                selected.append(character_id)
+
+            result[(chapter_no, section_no)] = selected or protagonists[:1]
+        return result
+
+    @staticmethod
+    def _profile_role_text(profile: dict[str, Any]) -> str:
+        narrative = profile.get("narrative", {})
+        return " ".join(
+            str(value).casefold()
+            for value in (
+                profile.get("role", ""),
+                narrative.get("conversation_role", ""),
+                narrative.get("relationship_to_protagonist", ""),
+            )
+        )
+
+    @classmethod
+    def _is_role(cls, profile: dict[str, Any], category: str) -> bool:
+        role = str(profile.get("role", "")).casefold()
+        narrative = profile.get("narrative", {})
+        conversation_role = str(narrative.get("conversation_role", "")).casefold()
+        relationship = str(
+            narrative.get("relationship_to_protagonist", "")
+        ).strip().casefold()
+        if category == "protagonist":
+            return any(
+                keyword in role
+                for keyword in ("主人公", "主役", "protagonist", "main character", "hero")
+            ) or relationship in {"本人", "self"}
+        return any(
+            keyword in f"{role} {conversation_role}"
+            for keyword in (
+                "相棒",
+                "助手",
+                "パートナー",
+                "companion",
+                "assistant",
+                "sidekick",
+                "partner",
+            )
+        )
+
+    @classmethod
+    def _role_priority(cls, profile: dict[str, Any]) -> int:
+        role_text = cls._profile_role_text(profile)
+        categories = (
+            (("師匠", "導き手", "mentor", "guide"), 0),
+            (("刑事", "捜査", "investigator", "detective"), 1),
+            (("ライバル", "rival"), 2),
+            (("親友", "友人", "friend"), 3),
+            (("敵", "犯人", "antagonist", "villain"), 4),
+        )
+        return next(
+            (
+                priority
+                for words, priority in categories
+                if any(word in role_text for word in words)
+            ),
+            2,
+        )
+
+    @classmethod
+    def _chapter_scope(
+        cls, profile: dict[str, Any], chapter_count: int
+    ) -> set[int] | None:
+        role_text = cls._profile_role_text(profile)
+        match = re.search(r"第\s*(\d+)\s*(?:[〜～\-]\s*(\d+))?\s*(?:話|章)", role_text)
+        if match is None:
+            match = re.search(
+                r"chapter\s*(\d+)\s*(?:[-–—]\s*(\d+))?", role_text
+            )
+        if match is None:
+            return None
+        start = max(1, int(match.group(1)))
+        end = min(chapter_count, int(match.group(2) or match.group(1)))
+        return set(range(start, end + 1)) if start <= end else set()
+
+    @classmethod
+    def _eligible_for_chapter(
+        cls, profile: dict[str, Any], chapter_no: int, chapter_count: int
+    ) -> bool:
+        scope = cls._chapter_scope(profile, chapter_count)
+        return scope is None or chapter_no in scope
 
 
 class GenerateCharacterImagesStep(Step):

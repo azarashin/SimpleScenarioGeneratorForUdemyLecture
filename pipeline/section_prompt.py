@@ -48,16 +48,20 @@ class ScenarioSectionPromptBuilder:
     ) -> RenderedSectionPrompt:
         definition = self.catalog.resolve(self.step_name, version)
         allowed_ids = list(section["participating_characters"])
-        known_ids = {profile["character_id"] for profile in character_profiles}
+        profiles_by_id = {
+            profile["character_id"]: profile for profile in character_profiles
+        }
+        known_ids = set(profiles_by_id)
         unknown_ids = set(allowed_ids) - known_ids
         if unknown_ids:
             raise ValueError(
                 f"Cannot build section prompt with unknown character IDs: {sorted(unknown_ids)}"
             )
+        participating_profiles = [profiles_by_id[item] for item in allowed_ids]
 
         variables = {
             "scenario_idea_json": self._json(scenario_idea),
-            "character_profiles_json": self._json(character_profiles),
+            "character_profiles_json": self._json(participating_profiles),
             "chapter_json": self._json(
                 {
                     "chapter_no": chapter["chapter_no"],

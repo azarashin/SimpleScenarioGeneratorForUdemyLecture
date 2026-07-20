@@ -689,6 +689,56 @@ def test_consistency_checker_rejects_ambiguous_character_names(make_context) -> 
         )
 
 
+def test_outline_plans_gradual_cast_and_honors_chapter_scopes() -> None:
+    roles = [
+        ("c001", "主人公"),
+        ("c002", "助手"),
+        ("c003", "師匠・導き手"),
+        ("c004", "ライバル検事"),
+        ("c005", "刑事"),
+        ("c006", "親友"),
+        ("c007", "第1〜4話の中核敵対者"),
+        ("c008", "第5話の被告人"),
+        ("c009", "第5話助手"),
+        ("c010", "第5話の真犯人"),
+    ]
+    profiles = [
+        {
+            "character_id": character_id,
+            "role": role,
+            "narrative": {
+                "conversation_role": role,
+                "relationship_to_protagonist": (
+                    "本人" if character_id == "c001" else "関係者"
+                ),
+            },
+        }
+        for character_id, role in roles
+    ]
+
+    planned = GenerateOutlineStep._plan_participation(
+        profiles,
+        chapter_count=5,
+        sections_per_chapter=6,
+    )
+
+    assert planned[(1, 1)] == ["c001", "c002"]
+    assert all(
+        character_id not in planned[(chapter_no, section_no)]
+        for character_id in ("c008", "c009", "c010")
+        for chapter_no in range(1, 5)
+        for section_no in range(1, 7)
+    )
+    assert "c008" in planned[(5, 1)]
+    assert "c009" not in planned[(5, 1)]
+    appeared = {
+        character_id
+        for participants in planned.values()
+        for character_id in participants
+    }
+    assert appeared == {character_id for character_id, _ in roles}
+
+
 def test_temperature_policy_limits_diversity_to_selected_steps(make_context) -> None:
     context, trace = make_context()
 

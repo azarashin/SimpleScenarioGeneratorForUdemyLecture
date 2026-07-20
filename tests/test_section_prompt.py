@@ -76,3 +76,27 @@ def test_section_prompt_rejects_unknown_participating_character(make_context) ->
             previous_state={},
             version="v2",
         )
+
+
+def test_section_prompt_excludes_non_participating_character_profiles(make_context) -> None:
+    context, chapter, section = _prepared_context(make_context)
+    profiles = [
+        *context.shared_data["character_profiles"],
+        {
+            "character_id": "c999",
+            "name": "OFFSTAGE-PROFILE-MARKER",
+            "role": "later character",
+        },
+    ]
+
+    prompt = ScenarioSectionPromptBuilder().build(
+        scenario_idea=context.shared_data["input"]["scenario_idea"],
+        character_profiles=profiles,
+        chapter=chapter,
+        section=section,
+        subsection=section["subsections"][0],
+        previous_state={},
+        version="v2",
+    )
+
+    assert "OFFSTAGE-PROFILE-MARKER" not in prompt.text
