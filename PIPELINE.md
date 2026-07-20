@@ -25,6 +25,18 @@ HTMLは `output/<run-id>/index.html` と `chapter-N/` 以下へUTF-8で原子的
 `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。
 画像生成の設定、実行例、成果物、再開方法は `IMAGE_GENERATION.md` を参照してください。
 
+## 自由形式の企画入力とStep 00
+
+`--input`で指定したファイルが正式な入力JSONでない場合、その全文を自由形式の企画メモとして
+読み込みます。`planning_input_generation.enabled=true`のとき、OpenAI Structured Outputsと
+`schemas/ai-pipeline-input.schema.json`を使って`scenario_idea`と最小限の
+`character_overviews`を生成します。
+
+成果物は`artifacts/step-00-generate-planning-input.json`へ保存され、`require_review=true`なら
+レビュー待ちで停止します。内容を確認・修正後、同じ入力ファイルとrun IDを指定し、
+`--from-step step-01-generate-character-profiles`で明示的に承認・再開します。既存の正式な
+`input.json`を指定した場合、Step 00はパイプラインへ挿入されません。
+
 ## キャラクター入力とStep 01
 
 `examples/input.json`の`character_overviews`には、最低限のID・名前・役割・概要に加え、
@@ -34,6 +46,17 @@ HTMLは `output/<run-id>/index.html` と `chapter-N/` 以下へUTF-8で原子的
 画像生成は外見・服装・基本ポーズ・画像用補足を参照し、本文生成は性格、価値観、長所短所、
 背景、成長軸、口調、禁止表現、セリフ例、人物間関係を参照します。`emotion_range`は全16表情の
 画像生成範囲を削らず、本文中で優先的に使用する表情の範囲として扱います。
+
+`character_profile_generation.enabled=true`の場合、Step 01はOpenAI Structured Outputsと
+`schemas/ai-character-profiles.schema.json`を使って詳細プロフィールを生成します。
+`require_review=true`なら、成果物の保存後に正常なレビュー待ち状態として停止します。
+
+```text
+output/<run-id>/artifacts/step-01-generate-character-profiles.json
+```
+
+確認・修正後、`--from-step step-02-generate-outline`で再開します。再開時は編集済み成果物を
+専用スキーマとパイプライン整合性規則で再検証してからアウトライン生成へ進みます。
 
 ## 画像生成設定
 

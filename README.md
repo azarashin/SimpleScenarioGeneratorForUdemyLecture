@@ -6,8 +6,16 @@
 
 ```mermaid
 flowchart TD
-    INPUT[入力JSON・設定] --> S01[Step 01<br/>キャラクタープロフィール生成]
-    S01 --> S02[Step 02<br/>章・節・サブセクションのアウトライン生成]
+    IDEA[自由形式の企画メモ] --> S00[Step 00<br/>正式な企画入力JSON生成]
+    S00 --> INPUT_REVIEW{企画入力を<br/>人間が確認・承認}
+    INPUT_REVIEW -->|修正する| INPUT_ARTIFACT[Step 00成果物を編集]
+    INPUT_ARTIFACT --> INPUT_REVIEW
+    INPUT_REVIEW -->|承認してStep 01から再開| S01
+    INPUT[既存の正式入力JSON・設定] --> S01[Step 01<br/>キャラクタープロフィール生成]
+    S01 --> REVIEW{人物設定を<br/>人間が確認・承認}
+    REVIEW -->|修正する| ARTIFACT[Step 01成果物を編集]
+    ARTIFACT --> REVIEW
+    REVIEW -->|承認してStep 02から再開| S02[Step 02<br/>章・節・サブセクションのアウトライン生成]
     S02 --> S03[Step 03<br/>基準画像・表情画像生成]
     S03 --> INIT[Step 04<br/>累積状態を初期化]
     INIT --> STATE
@@ -74,6 +82,103 @@ python run_pipeline.py `
   --config examples/pipeline.openai.config.json `
   --input examples/input.json `
   --run-id openai-scenario-001
+```
+
+### 自由形式のアイデアから開始する（Step 00）
+
+`--input`にはJSONだけでなく、文章、箇条書き、Markdownなどの自由形式ファイルを指定できます。
+ファイルが`scenario_idea`と`character_overviews`を持つ正式なJSONでない場合、Step 00が
+ファイル全文を企画メモとして読み込み、パイプライン用の入力JSONを生成します。例として
+`examples/rough-idea.txt`を用意しています。
+
+```powershell
+python run_pipeline.py `
+  --config examples/pipeline.openai.config.json `
+  --input examples/rough-idea.txt `
+  --run-id rough-idea-scenario-001
+```
+
+生成後はレビュー待ちで停止します。
+
+```text
+Run paused for review after: step-00-generate-planning-input
+Review artifact: output/<run-id>/artifacts/step-00-generate-planning-input.json
+```
+
+成果物内の`input.scenario_idea`と`input.character_overviews`を確認し、必要なら直接編集します。
+特に題名、テーマ、前提、必須・禁止要素、章数、節数、登場人物の人数と役割を確認してください。
+承認後は、元の自由形式ファイルと同じrun IDを指定してStep 01から再開します。
+
+```powershell
+python run_pipeline.py `
+  --config examples/pipeline.openai.config.json `
+  --input examples/rough-idea.txt `
+  --run-id rough-idea-scenario-001 `
+  --from-step step-01-generate-character-profiles
+```
+
+`--from-step step-01-generate-character-profiles`による再開をStep 00成果物への明示的な承認として
+扱います。再開すると承認済みの企画入力が読み込まれ、Step 01で詳細な人物設定を生成した後、
+もう一度人物設定のレビュー待ちで停止します。
+
+自由形式入力を許可する設定は次のとおりです。OpenAI用サンプル設定では有効になっています。
+
+```json
+{
+  "planning_input_generation": {
+    "enabled": true,
+    "require_review": true
+  }
+}
+```
+
+### Step 01の人物設定を確認・承認する
+
+OpenAI設定では、Step 01で人物設定をAI生成した直後にパイプラインが正常終了ではなく
+「レビュー待ち」として自動停止します。コンソールには次のように確認対象が表示されます。
+
+```text
+Run paused for review after: step-01-generate-character-profiles
+Review artifact: output/<run-id>/artifacts/step-01-generate-character-profiles.json
+```
+
+確認対象のファイルは次のとおりです。
+
+```text
+output/<run-id>/artifacts/step-01-generate-character-profiles.json
+```
+
+次の手順で確認・承認します。
+
+1. `character_profiles`に、意図した人数とキャラクターIDが含まれていることを確認します。
+2. 性格、背景、成長軸、話し方、人物関係、外見、表情ルールを確認します。
+3. 修正が必要なら、このJSONファイルを直接編集して保存します。
+4. 内容を承認できたら、同じrun IDを指定してStep 02から再開します。
+
+専用の対話式承認コマンドはありません。`--from-step step-02-generate-outline`による再開を
+明示的な承認として扱います。
+
+```powershell
+python run_pipeline.py `
+  --config examples/pipeline.openai.config.json `
+  --input examples/input.json `
+  --run-id openai-scenario-001 `
+  --from-step step-02-generate-outline
+```
+
+再開時には、編集済みの人物設定をJSON Schemaで検証し、キャラクターID、人物関係の参照先、
+利用可能な表情、優先表情、表情ルールの整合性も再検証します。不正な内容がある場合はStep 02へ
+進まずエラーになるため、表示された項目を修正して同じコマンドを再実行してください。
+
+自動生成を使わない場合は、設定ファイルで次のように指定します。
+
+```json
+{
+  "character_profile_generation": {
+    "enabled": false,
+    "require_review": true
+  }
+}
 ```
 
 ## キャラクター初期設定

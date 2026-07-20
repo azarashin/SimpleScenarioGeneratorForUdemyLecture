@@ -329,6 +329,33 @@ def test_openai_provider_uses_responses_api_and_parses_json() -> None:
     }
 
 
+def test_openai_provider_accepts_step_specific_response_schema() -> None:
+    responses = FakeResponsesClient('{"character_profiles": []}')
+    provider = OpenAITextGenerationProvider(
+        api_key="not-used-by-fake",
+        timeout_seconds=30,
+        client=SimpleNamespace(responses=responses),
+    )
+    schema = {
+        "type": "object",
+        "required": ["character_profiles"],
+        "additionalProperties": False,
+        "properties": {"character_profiles": {"type": "array"}},
+    }
+
+    provider.generate_json(
+        prompt="generate profiles",
+        model="gpt-test",
+        temperature=0.2,
+        response_schema=schema,
+        response_name="character_profile_generation",
+    )
+
+    response_format = responses.calls[0]["text"]["format"]
+    assert response_format["name"] == "character_profile_generation"
+    assert response_format["schema"] == schema
+
+
 def test_openai_provider_rejects_non_json_output() -> None:
     provider = OpenAITextGenerationProvider(
         api_key="not-used-by-fake",

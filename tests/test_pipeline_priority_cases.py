@@ -16,8 +16,14 @@ from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyCheck
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
 from pipeline.prompt_impact import PromptImpactReporter
 from pipeline.prompts import PromptCatalog
-from pipeline.steps import GenerateCharacterProfilesStep, build_minimal_steps
+from pipeline.steps import (
+    GeneratePlanningInputStep,
+    GenerateCharacterProfilesStep,
+    GenerateOutlineStep,
+    build_minimal_steps,
+)
 from pipeline.state import StepState
+from pipeline.text_generation import MockTextGenerationProvider
 from pipeline.types import Step, StepContext, StepResult
 
 
@@ -269,6 +275,10 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     assert conf.scenario_body_generation.target_characters == 1200
     assert conf.scenario_body_generation.min_characters == 1000
     assert conf.scenario_body_generation.max_characters == 1600
+    assert conf.character_profile_generation.enabled is False
+    assert conf.character_profile_generation.require_review is True
+    assert conf.planning_input_generation.enabled is False
+    assert conf.planning_input_generation.require_review is True
 
 
 def test_scenario_body_length_can_be_overridden(tmp_path: Path) -> None:
@@ -537,6 +547,88 @@ def test_character_profile_preserves_enriched_input(make_context) -> None:
     assert profile["emotion_model"]["expression_rules"] == [
         {"condition": "考えを整理する", "expression": "thinking"}
     ]
+
+
+def test_ai_character_profiles_pause_for_review_and_resume(make_context) -> None:
+    context, trace = make_context()
+    profiles = GenerateCharacterProfilesStep().run(context).output[
+        "character_profiles"
+    ]
+    for profile in profiles:
+        profile["speech"]["sample_lines"] = ["line one", "line two", "line three"]
+    context.config.character_profile_generation.enabled = True
+    context.config.character_profile_generation.require_review = True
+    context.text_generation_provider = MockTextGenerationProvider(
+        [{"character_profiles": profiles}]
+    )
+    engine = StepExecutionEngine(
+        [GenerateCharacterProfilesStep(), GenerateOutlineStep()]
+    )
+
+    first_output = engine.run(context)
+
+    assert context.paused_after_step == "step-01-generate-character-profiles"
+    assert "character_profiles" in first_output
+    assert "scenario_outline" not in first_output
+    assert any(
+        event.get("event") == "pipeline_paused_for_review"
+        for event in trace.events
+    )
+
+    resumed_output = engine.run(
+        context,
+        options=ExecutionOptions(from_step="step-02-generate-outline"),
+    )
+
+    assert context.paused_after_step is None
+    assert "scenario_outline" in resumed_output
+
+
+def test_free_form_planning_input_pauses_and_resumes_at_step_01(make_context) -> None:
+    context, _ = make_context(include_input=False)
+    generated_input = {
+        "scenario_idea": {
+            "title": "Clock Library",
+            "genre": "fantasy",
+            "theme": "trust",
+            "premise": "Two librarians investigate disappearing history.",
+            "tone": "mysterious but hopeful",
+            "must_include": ["a damaged book"],
+            "must_avoid": ["graphic violence"],
+            "audience": "young adults",
+            "target_length": {"chapter_count": 1, "sections_per_chapter": 1},
+        },
+        "character_overviews": [
+            {
+                "character_id": "c001",
+                "name": "Aoi",
+                "role": "apprentice librarian",
+                "summary": "A careful apprentice who has lost part of her memory.",
+            }
+        ],
+    }
+    context.shared_data["rough_idea"] = "A fantasy story set in a time library."
+    context.config.planning_input_generation.enabled = True
+    context.config.planning_input_generation.require_review = True
+    context.text_generation_provider = MockTextGenerationProvider([generated_input])
+    engine = StepExecutionEngine(
+        [GeneratePlanningInputStep(), GenerateCharacterProfilesStep()]
+    )
+
+    output = engine.run(context)
+
+    assert context.paused_after_step == "step-00-generate-planning-input"
+    assert output["input"] == generated_input
+    assert "character_profiles" not in output
+
+    resumed = engine.run(
+        context,
+        options=ExecutionOptions(from_step="step-01-generate-character-profiles"),
+    )
+
+    assert context.paused_after_step is None
+    assert resumed["input"] == generated_input
+    assert resumed["character_profiles"][0]["character_id"] == "c001"
 
 
 def test_consistency_checker_rejects_ambiguous_character_names(make_context) -> None:

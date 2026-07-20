@@ -46,6 +46,7 @@ class StepExecutionEngine:
     def run(self, context: StepContext, options: ExecutionOptions | None = None) -> dict[str, object]:
         opts = options or ExecutionOptions()
         context.force = opts.force
+        context.paused_after_step = None
         step_names = {step.name for step in self.steps}
         if opts.from_step is not None and opts.from_step not in step_names:
             raise RuntimeError(f"Unknown from-step: {opts.from_step}")
@@ -103,6 +104,9 @@ class StepExecutionEngine:
                             "reason": "already_completed",
                         }
                     )
+                    if step.requires_review_after_success(context):
+                        self._pause_for_review(step, context)
+                        break
                     continue
 
             success = self._run_single_step(step=step, context=context)
@@ -125,7 +129,25 @@ class StepExecutionEngine:
                     f"Trace log: {trace_path}"
                 )
 
+            if step.requires_review_after_success(context):
+                self._pause_for_review(step, context)
+                break
+
         return context.shared_data
+
+    @staticmethod
+    def _pause_for_review(step: Step, context: StepContext) -> None:
+        context.paused_after_step = step.name
+        context.trace_logger.log(
+            {
+                "run_id": context.run_id,
+                "step": step.name,
+                "event": "pipeline_paused_for_review",
+                "artifact_path": str(
+                    Path(context.artifacts_dir) / f"{step.name}.json"
+                ),
+            }
+        )
 
     def _run_single_step(self, step: Step, context: StepContext) -> bool:
         plans = self._build_attempt_plans(context)

@@ -83,6 +83,8 @@ class TextGenerationProvider(ABC):
         prompt: str,
         model: str,
         temperature: float,
+        response_schema: dict[str, Any] | None = None,
+        response_name: str = "generated_response",
     ) -> GenerationResponse:
         """Generate and return a parsed JSON object."""
         raise NotImplementedError
@@ -104,6 +106,8 @@ class MockTextGenerationProvider(TextGenerationProvider):
         prompt: str,
         model: str,
         temperature: float,
+        response_schema: dict[str, Any] | None = None,
+        response_name: str = "generated_response",
     ) -> GenerationResponse:
         self.requests.append(GenerationRequest(prompt, model, temperature))
         if not self._responses:
@@ -138,6 +142,8 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
         prompt: str,
         model: str,
         temperature: float,
+        response_schema: dict[str, Any] | None = None,
+        response_name: str = "generated_response",
     ) -> GenerationResponse:
         self.requests.append(GenerationRequest(prompt, model, temperature))
         marker_index = prompt.find(self.target_marker)
@@ -285,6 +291,8 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
         prompt: str,
         model: str,
         temperature: float,
+        response_schema: dict[str, Any] | None = None,
+        response_name: str = "scenario_section_response",
     ) -> GenerationResponse:
         response = self.client.responses.create(
             model=model,
@@ -293,9 +301,9 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
             text={
                 "format": {
                     "type": "json_schema",
-                    "name": "scenario_section_response",
+                    "name": response_name,
                     "strict": True,
-                    "schema": _scenario_section_response_schema(),
+                    "schema": response_schema or _scenario_section_response_schema(),
                 }
             },
         )

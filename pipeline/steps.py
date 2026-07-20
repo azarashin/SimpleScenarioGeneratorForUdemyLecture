@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from PIL import Image
+from jsonschema import Draft202012Validator
 
 from .asset_manager import CharacterAssetResolver
 from .artifact_loader import PipelineArtifactLoader
@@ -29,6 +30,74 @@ from .html_validation import HtmlOutputValidator
 from .types import Step, StepContext, StepResult
 
 
+class GeneratePlanningInputStep(Step):
+    name = "step-00-generate-planning-input"
+    schema_name = "step-00-generate-planning-input.schema.json"
+    input_keys = ("rough_idea",)
+
+    def run(self, context: StepContext) -> StepResult:
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "schemas"
+            / "ai-pipeline-input.schema.json"
+        )
+        response_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        api_response_schema = dict(response_schema)
+        api_response_schema.pop("$schema", None)
+        rough_idea = str(context.shared_data["rough_idea"]).strip()
+        if not rough_idea:
+            raise ValueError("The free-form scenario idea must not be empty.")
+        generation_prompt = (
+            "Convert the following free-form scenario idea into a concrete planning input "
+            "for a scenario generation pipeline. Preserve explicit user intent and fill only "
+            "missing details needed to create an outline and character profiles. Do not import "
+            "themes, terminology, or facts from unrelated requests. Character IDs must be unique "
+            "lowercase identifiers such as c001, c002. must_include and must_avoid must clearly "
+            "separate requirements from prohibitions. Return only JSON matching the schema.\n\n"
+            "FREE-FORM IDEA\n"
+            f"{rough_idea}\n\n"
+            "OUTPUT JSON SCHEMA\n"
+            f"{json.dumps(response_schema, ensure_ascii=False, indent=2)}"
+        )
+        response = context.text_generation_provider.generate_json(
+            prompt=generation_prompt,
+            model=context.config.text_generation.model,
+            temperature=context.config.temperature_for(self.name),
+            response_schema=api_response_schema,
+            response_name="planning_input_generation",
+        )
+        errors = sorted(
+            Draft202012Validator(response_schema).iter_errors(response.data),
+            key=lambda error: list(error.path),
+        )
+        if errors:
+            error = errors[0]
+            location = ".".join(str(part) for part in error.path) or "<root>"
+            raise ValueError(
+                f"AI planning input schema validation failed at {location}: "
+                f"{error.message}"
+            )
+        character_ids = [
+            item["character_id"] for item in response.data["character_overviews"]
+        ]
+        if len(character_ids) != len(set(character_ids)):
+            raise ValueError("AI planning input contains duplicate character IDs.")
+        return StepResult(
+            output={"input": response.data},
+            prompt=generation_prompt,
+            prompt_version="ai-v1",
+            prompt_hash=hashlib.sha256(generation_prompt.encode("utf-8")).hexdigest(),
+            model=response.model,
+            temperature=context.config.temperature_for(self.name),
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            metadata={"human_review_required": True},
+        )
+
+    def requires_review_after_success(self, context: StepContext) -> bool:
+        return context.config.planning_input_generation.require_review
+
+
 class GenerateCharacterProfilesStep(Step):
     name = "step-01-generate-character-profiles"
     schema_name = "step-01-generate-character-profiles.schema.json"
@@ -37,6 +106,51 @@ class GenerateCharacterProfilesStep(Step):
     def run(self, context: StepContext) -> StepResult:
         prompt = resolve_step_prompt(context, self.name)
         input_data = context.shared_data["input"]
+        if context.config.character_profile_generation.enabled:
+            schema_path = (
+                Path(__file__).resolve().parent.parent
+                / "schemas"
+                / "ai-character-profiles.schema.json"
+            )
+            response_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            api_response_schema = dict(response_schema)
+            api_response_schema.pop("$schema", None)
+            generation_prompt = self._ai_generation_prompt(
+                input_data,
+                response_schema,
+            )
+            response = context.text_generation_provider.generate_json(
+                prompt=generation_prompt,
+                model=context.config.text_generation.model,
+                temperature=context.config.temperature_for(self.name),
+                response_schema=api_response_schema,
+                response_name="character_profile_generation",
+            )
+            schema_errors = sorted(
+                Draft202012Validator(response_schema).iter_errors(response.data),
+                key=lambda error: list(error.path),
+            )
+            if schema_errors:
+                error = schema_errors[0]
+                location = ".".join(str(part) for part in error.path) or "<root>"
+                raise ValueError(
+                    "AI character profile schema validation failed at "
+                    f"{location}: {error.message}"
+                )
+            return StepResult(
+                output={"character_profiles": response.data["character_profiles"]},
+                prompt=generation_prompt,
+                prompt_version="ai-v1",
+                prompt_hash=hashlib.sha256(
+                    generation_prompt.encode("utf-8")
+                ).hexdigest(),
+                model=response.model,
+                temperature=context.config.temperature_for(self.name),
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                metadata={"human_review_required": True},
+            )
+
         profiles: list[dict[str, Any]] = []
         for item in input_data["character_overviews"]:
             speech_profile = item.get("speech_profile", {})
@@ -125,6 +239,37 @@ class GenerateCharacterProfilesStep(Step):
             output_tokens=240,
         )
 
+    def requires_review_after_success(self, context: StepContext) -> bool:
+        config = context.config.character_profile_generation
+        return config.enabled and config.require_review
+
+    @staticmethod
+    def _ai_generation_prompt(
+        input_data: dict[str, Any], response_schema: dict[str, Any]
+    ) -> str:
+        canonical_expressions = [name for name, _ in EXPRESSION_CONCEPTS]
+        return (
+            "You are designing canonical character profiles for a structured scenario.\n\n"
+            "SCENARIO IDEA\n"
+            f"{json.dumps(input_data['scenario_idea'], ensure_ascii=False, indent=2)}\n\n"
+            "CHARACTER SEEDS\n"
+            f"{json.dumps(input_data['character_overviews'], ensure_ascii=False, indent=2)}\n\n"
+            "CANONICAL EXPRESSIONS\n"
+            f"{json.dumps(canonical_expressions, ensure_ascii=False)}\n\n"
+            "OUTPUT JSON SCHEMA\n"
+            f"{json.dumps(response_schema, ensure_ascii=False, indent=2)}\n\n"
+            "Requirements:\n"
+            "- Preserve every character_id, name, and role exactly; do not add or remove characters.\n"
+            "- Expand underspecified seeds into concrete, mutually consistent profiles useful for story, dialogue, continuity, and image generation.\n"
+            "- Avoid generic traits. Make strengths, weaknesses, values, growth arcs, speech differences, and relationships produce usable dramatic tension.\n"
+            "- relationships may reference only character IDs from CHARACTER SEEDS.\n"
+            "- available_expressions must equal CANONICAL EXPRESSIONS in exactly that order.\n"
+            "- preferred_expressions must be a non-empty subset containing neutral.\n"
+            "- Every expression_rules.expression must occur in preferred_expressions.\n"
+            "- Provide at least three natural sample lines per character and keep forbidden_phrases clearly distinct from their voice.\n"
+            "- Return only the JSON object required by OUTPUT JSON SCHEMA."
+        )
+
 
 class GenerateOutlineStep(Step):
     name = "step-02-generate-outline"
@@ -134,6 +279,30 @@ class GenerateOutlineStep(Step):
     def run(self, context: StepContext) -> StepResult:
         prompt = resolve_step_prompt(context, self.name)
         input_data = context.shared_data["input"]
+        if context.config.character_profile_generation.enabled:
+            schema_path = (
+                Path(__file__).resolve().parent.parent
+                / "schemas"
+                / "ai-character-profiles.schema.json"
+            )
+            response_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            schema_errors = sorted(
+                Draft202012Validator(response_schema).iter_errors(
+                    {"character_profiles": context.shared_data["character_profiles"]}
+                ),
+                key=lambda error: list(error.path),
+            )
+            if schema_errors:
+                error = schema_errors[0]
+                location = ".".join(str(part) for part in error.path) or "<root>"
+                raise ValueError(
+                    "Reviewed character profile schema validation failed at "
+                    f"{location}: {error.message}"
+                )
+        PipelineConsistencyChecker().check(
+            context.shared_data,
+            {"character_profiles": context.shared_data["character_profiles"]},
+        )
         profile_ids = [x["character_id"] for x in context.shared_data["character_profiles"]]
         target = input_data["scenario_idea"]["target_length"]
 
@@ -1519,8 +1688,8 @@ class RenderHtmlStep(Step):
         )
 
 
-def build_minimal_steps() -> list[Step]:
-    return [
+def build_minimal_steps(*, include_planning_input_generation: bool = False) -> list[Step]:
+    steps: list[Step] = [
         GenerateCharacterProfilesStep(),
         GenerateOutlineStep(),
         GenerateCharacterImagesStep(),
@@ -1528,3 +1697,6 @@ def build_minimal_steps() -> list[Step]:
         GenerateDialogueTagsStep(),
         RenderHtmlStep(),
     ]
+    if include_planning_input_generation:
+        steps.insert(0, GeneratePlanningInputStep())
+    return steps

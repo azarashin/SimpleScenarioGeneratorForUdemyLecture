@@ -5,6 +5,14 @@
         "timeout_seconds": 120,
         "api_key_env": "OPENAI_API_KEY"
     },
+    "character_profile_generation": {
+        "enabled": true,
+        "require_review": true
+    },
+    "planning_input_generation": {
+        "enabled": true,
+        "require_review": true
+    },
     "scenario_body_generation": {
         "subsections_per_section": 3,
         "target_characters": 1200,

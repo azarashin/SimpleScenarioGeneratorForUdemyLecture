@@ -35,7 +35,25 @@ def main() -> None:
     state_file = run_root / config.state_file_name
     trace_file = run_root / config.trace_file_name
 
-    input_data = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    input_text = Path(args.input).read_text(encoding="utf-8")
+    try:
+        parsed_input = json.loads(input_text)
+    except json.JSONDecodeError:
+        parsed_input = None
+    is_structured_input = bool(
+        isinstance(parsed_input, dict)
+        and "scenario_idea" in parsed_input
+        and "character_overviews" in parsed_input
+    )
+    if not is_structured_input and not config.planning_input_generation.enabled:
+        raise ValueError(
+            "Free-form input requires planning_input_generation.enabled=true."
+        )
+    shared_data = (
+        {"input": parsed_input}
+        if is_structured_input
+        else {"rough_idea": input_text.strip()}
+    )
 
     context = StepContext(
         run_id=run_id,
@@ -43,7 +61,7 @@ def main() -> None:
         artifacts_dir=str(artifacts_dir),
         state_store=RunStateStore(state_file),
         trace_logger=TraceLogger(trace_file),
-        shared_data={"input": input_data},
+        shared_data=shared_data,
         text_generation_provider=create_text_generation_provider(
             config.text_generation.provider,
             timeout_seconds=config.text_generation.timeout_seconds,
@@ -58,7 +76,9 @@ def main() -> None:
         ),
     )
 
-    engine = StepExecutionEngine(build_minimal_steps())
+    engine = StepExecutionEngine(
+        build_minimal_steps(include_planning_input_generation=not is_structured_input)
+    )
     output = engine.run(
         context,
         options=ExecutionOptions(from_step=args.from_step, force=args.force),
@@ -67,7 +87,14 @@ def main() -> None:
     summary_path = run_root / "summary.json"
     summary_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"Run completed: {run_id}")
+    if context.paused_after_step:
+        print(f"Run paused for review after: {context.paused_after_step}")
+        print(
+            "Review artifact: "
+            f"{artifacts_dir / f'{context.paused_after_step}.json'}"
+        )
+    else:
+        print(f"Run completed: {run_id}")
     print(f"Artifacts: {artifacts_dir}")
     print(f"State: {state_file}")
     print(f"Trace: {trace_file}")

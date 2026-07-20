@@ -12,6 +12,26 @@ from .errors import ConsistencyCheckError
 from .scenario_quality import ScenarioBodyQualityChecker
 
 
+CANONICAL_EXPRESSIONS = (
+    "neutral",
+    "smile",
+    "serious",
+    "thinking",
+    "surprised",
+    "worried",
+    "confused",
+    "angry",
+    "sad",
+    "relieved",
+    "embarrassed",
+    "nervous",
+    "confident",
+    "doubtful",
+    "shocked",
+    "determined",
+)
+
+
 class PipelineConsistencyChecker:
     def __init__(self) -> None:
         self.scenario_quality_checker = ScenarioBodyQualityChecker()
@@ -312,6 +332,13 @@ class PipelineConsistencyChecker:
             available_expressions = set(
                 profile["emotion_model"]["available_expressions"]
             )
+            if profile["emotion_model"]["available_expressions"] != list(
+                CANONICAL_EXPRESSIONS
+            ):
+                self._fail(
+                    f"character {character_id} available expressions must equal "
+                    "the canonical expression list in canonical order"
+                )
             unknown_preferred_expressions = set(
                 profile["emotion_model"].get("preferred_expressions", [])
             ) - available_expressions
@@ -319,6 +346,13 @@ class PipelineConsistencyChecker:
                 self._fail(
                     f"character {character_id} prefers unavailable expressions: "
                     f"{sorted(unknown_preferred_expressions)}"
+                )
+            preferred_expressions = profile["emotion_model"].get(
+                "preferred_expressions", []
+            )
+            if preferred_expressions and "neutral" not in preferred_expressions:
+                self._fail(
+                    f"character {character_id} preferred expressions must include neutral"
                 )
             unknown_rule_expressions = {
                 rule["expression"]

@@ -28,6 +28,7 @@ class StepContext:
     text_generation_provider: "TextGenerationProvider"
     image_generation_provider: "ImageGenerationProvider"
     force: bool = False
+    paused_after_step: str | None = None
 
 
 class Step:
@@ -54,6 +55,10 @@ class Step:
     def retry_phase_for_error(self, error: Exception) -> str | None:
         """Optionally route an error directly to a compatible retry phase."""
         return None
+
+    def requires_review_after_success(self, context: StepContext) -> bool:
+        """Return whether the pipeline must stop for human review after this step."""
+        return False
 
 
 from .config import AppConfig  # noqa: E402

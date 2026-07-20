@@ -5,6 +5,8 @@
 ## 成果物スキーマ
 
 - `input.schema.json`: シナリオの入力データ
+- `ai-pipeline-input.schema.json`: Step 00がStructured Outputsで生成する企画入力
+- `ai-character-profiles.schema.json`: Step 01がStructured Outputsで生成する詳細人物設定
 - `character-profiles.schema.json`: 登場人物プロフィール
 - `scenario-outline.schema.json`: シナリオアウトライン
 - `scenario-sections.schema.json`: 章・節ごとのシナリオ本文
@@ -16,6 +18,7 @@
 
 ## ステップ入出力スキーマ
 
+- `step-00-generate-planning-input.schema.json`
 - `step-01-generate-character-profiles.schema.json`
 - `step-02-generate-outline.schema.json`
 - `step-03-generate-character-images.schema.json`

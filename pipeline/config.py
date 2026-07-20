@@ -30,6 +30,18 @@ class TextGenerationConfig:
 
 
 @dataclass(slots=True)
+class CharacterProfileGenerationConfig:
+    enabled: bool = False
+    require_review: bool = True
+
+
+@dataclass(slots=True)
+class PlanningInputGenerationConfig:
+    enabled: bool = False
+    require_review: bool = True
+
+
+@dataclass(slots=True)
 class ScenarioBodyGenerationConfig:
     subsections_per_section: int = 3
     target_characters: int = 1200
@@ -65,6 +77,12 @@ class AppConfig:
     trace_file_name: str = "trace.jsonl"
     image_generation: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
     text_generation: TextGenerationConfig = field(default_factory=TextGenerationConfig)
+    character_profile_generation: CharacterProfileGenerationConfig = field(
+        default_factory=CharacterProfileGenerationConfig
+    )
+    planning_input_generation: PlanningInputGenerationConfig = field(
+        default_factory=PlanningInputGenerationConfig
+    )
     scenario_body_generation: ScenarioBodyGenerationConfig = field(
         default_factory=ScenarioBodyGenerationConfig
     )
@@ -121,6 +139,14 @@ def _to_default_dict() -> dict[str, Any]:
             "timeout_seconds": DEFAULT_CONFIG.text_generation.timeout_seconds,
             "api_key_env": DEFAULT_CONFIG.text_generation.api_key_env,
         },
+        "character_profile_generation": {
+            "enabled": DEFAULT_CONFIG.character_profile_generation.enabled,
+            "require_review": DEFAULT_CONFIG.character_profile_generation.require_review,
+        },
+        "planning_input_generation": {
+            "enabled": DEFAULT_CONFIG.planning_input_generation.enabled,
+            "require_review": DEFAULT_CONFIG.planning_input_generation.require_review,
+        },
         "scenario_body_generation": {
             "subsections_per_section": (
                 DEFAULT_CONFIG.scenario_body_generation.subsections_per_section
@@ -166,6 +192,8 @@ def load_config(config_path: str | None) -> AppConfig:
     image_conf = merged.get("image_generation", {})
     text_conf = merged.get("text_generation", {})
     body_conf = merged.get("scenario_body_generation", {})
+    profile_generation_conf = merged.get("character_profile_generation", {})
+    planning_generation_conf = merged.get("planning_input_generation", {})
     retry_conf = merged.get("retry_strategy", {})
     temperature_conf = merged.get("temperature_policy", {})
     image_provider = str(image_conf.get("provider", "")).strip()
@@ -282,6 +310,14 @@ def load_config(config_path: str | None) -> AppConfig:
             model=text_model,
             timeout_seconds=timeout_seconds,
             api_key_env=api_key_env,
+        ),
+        character_profile_generation=CharacterProfileGenerationConfig(
+            enabled=bool(profile_generation_conf.get("enabled", False)),
+            require_review=bool(profile_generation_conf.get("require_review", True)),
+        ),
+        planning_input_generation=PlanningInputGenerationConfig(
+            enabled=bool(planning_generation_conf.get("enabled", False)),
+            require_review=bool(planning_generation_conf.get("require_review", True)),
         ),
         scenario_body_generation=ScenarioBodyGenerationConfig(
             subsections_per_section=subsections_per_section,

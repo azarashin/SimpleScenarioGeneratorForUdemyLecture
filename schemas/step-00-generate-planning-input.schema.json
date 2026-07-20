@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/step-00-generate-planning-input.schema.json",
+  "title": "Step 00 Contract: Generate Planning Input",
+  "type": "object",
+  "required": ["input", "output"],
+  "additionalProperties": false,
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": ["rough_idea"],
+      "additionalProperties": false,
+      "properties": {
+        "rough_idea": { "type": "string", "minLength": 1 }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["input"],
+      "additionalProperties": false,
+      "properties": {
+        "input": { "$ref": "input.schema.json" }
+      }
+    }
+  }
+}
