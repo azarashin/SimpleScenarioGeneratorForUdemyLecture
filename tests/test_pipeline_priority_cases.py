@@ -13,7 +13,7 @@ from pipeline.config import (
     load_config,
 )
 from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyChecker
-from pipeline.engine import ExecutionOptions, StepExecutionEngine
+from pipeline.engine import AttemptPlan, ExecutionOptions, StepExecutionEngine
 from pipeline.prompt_impact import PromptImpactReporter
 from pipeline.prompts import PromptCatalog
 from pipeline.scenario_review import ReviewOutlineStep, _inline_common_refs
@@ -25,7 +25,7 @@ from pipeline.steps import (
     build_minimal_steps,
 )
 from pipeline.state import StepState
-from pipeline.text_generation import MockTextGenerationProvider
+from pipeline.text_generation import GenerationResponse, MockTextGenerationProvider
 from pipeline.types import Step, StepContext, StepResult
 
 
@@ -275,7 +275,7 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     assert conf.image_generation.api_key_env == "OPENAI_API_KEY"
     assert conf.scenario_body_generation.subsections_per_section == 3
     assert conf.scenario_body_generation.target_characters == 1200
-    assert conf.scenario_body_generation.min_characters == 1000
+    assert conf.scenario_body_generation.min_characters == 900
     assert conf.scenario_body_generation.max_characters == 1600
     assert conf.character_profile_generation.enabled is False
     assert conf.character_profile_generation.require_review is True
@@ -374,6 +374,198 @@ def test_outline_review_restores_immutable_title_and_logline() -> None:
 
     assert reviewed["title"] == "Canonical title"
     assert reviewed["logline"] == "Canonical premise"
+
+
+def test_outline_review_restores_chapter_section_and_event_identity() -> None:
+    event = {"event_id": "phase-1-beat-1", "description": "Draft event"}
+    planned_updates = {
+        "character_locations": [],
+        "possessions": [],
+        "known_information": [],
+        "relationship_changes": [],
+        "introduced_entities": [],
+        "opened_thread_ids": [],
+        "resolved_thread_ids": [],
+        "planted_clue_ids": [],
+        "paid_off_clue_ids": [],
+        "character_arc_changes": [],
+        "resulting_state_summary": "The event is complete.",
+    }
+    subsection = {
+        "subsection_no": 1,
+        "subsection_title": "Beat",
+        "subsection_purpose": "Advance",
+        "key_events": [deepcopy(event)],
+        "start_state": "Before",
+        "state_change": deepcopy(event),
+        "end_state": "After",
+        "planned_state_updates": planned_updates,
+        "must_not_repeat": ["Do not repeat."],
+    }
+    draft = {
+        "chapter_no": 5,
+        "chapter_title": "Draft",
+        "chapter_goal": "Goal",
+        "sections": [
+            {
+                "section_no": 6,
+                "section_title": "Section",
+                "section_purpose": "Purpose",
+                "key_events": [deepcopy(event)],
+                "participating_characters": ["c001"],
+                "subsections": [deepcopy(subsection)],
+            }
+        ],
+    }
+    reviewed = deepcopy(draft)
+    reviewed["chapter_no"] = 1
+    reviewed["sections"][0]["section_no"] = 1
+    reviewed["sections"][0]["key_events"][0]["event_id"] = "wrong"
+    reviewed["sections"][0]["subsections"][0]["subsection_no"] = 1
+    reviewed["sections"][0]["subsections"][0]["key_events"][0][
+        "event_id"
+    ] = "wrong"
+    reviewed["sections"][0]["subsections"][0]["state_change"][
+        "event_id"
+    ] = "wrong"
+
+    restored = ReviewOutlineStep._restore_chapter_identity(reviewed, draft)
+
+    assert restored["chapter_no"] == 5
+    assert restored["sections"][0]["section_no"] == 6
+    assert restored["sections"][0]["key_events"][0]["event_id"] == event[
+        "event_id"
+    ]
+    assert restored["sections"][0]["subsections"][0]["state_change"] == (
+        restored["sections"][0]["subsections"][0]["key_events"][0]
+    )
+
+
+def test_outline_review_unit_retries_with_exact_validation_feedback(
+    make_context,
+) -> None:
+    context, trace = make_context()
+
+    class UnitProvider:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def generate_json(self, **kwargs) -> GenerationResponse:
+            self.prompts.append(kwargs["prompt"])
+            sections = [1] if len(self.prompts) == 1 else [1, 2]
+            return GenerationResponse(
+                data={
+                    "review_report": {
+                        "passed": True,
+                        "score": 100,
+                        "repair_scope": "none",
+                        "findings": [],
+                    },
+                    "chapter": {"sections": sections},
+                },
+                model="test-model",
+                input_tokens=10,
+                output_tokens=20,
+            )
+
+    provider = UnitProvider()
+    context.text_generation_provider = provider
+
+    def require_two_sections(data):
+        count = len(data["chapter"]["sections"])
+        if count != 2:
+            raise ValueError(f"returned {count} sections; expected 2")
+        return data["chapter"]
+
+    result, metrics = ReviewOutlineStep()._generate_review_unit(
+        context=context,
+        unit_key="chapter-003",
+        prompt="review chapter 3",
+        response_schema={"type": "object"},
+        response_name="chapter_3",
+        transform=require_two_sections,
+    )
+
+    assert result["value"]["sections"] == [1, 2]
+    assert metrics["input_tokens"] == 20
+    assert len(provider.prompts) == 2
+    assert "returned 1 sections; expected 2" in provider.prompts[1]
+    assert "Return the complete requested unit" in provider.prompts[1]
+    failed = [
+        event
+        for event in trace.events
+        if event.get("event") == "outline_review_unit_failed"
+    ]
+    assert failed[0]["unit"] == "chapter-003"
+
+
+def test_non_retryable_unit_failure_stops_outer_step_retry() -> None:
+    plans = [AttemptPlan("initial", 1), AttemptPlan("fallback", 1)]
+
+    assert StepExecutionEngine._next_plan_index(
+        plans=plans,
+        current_index=0,
+        preferred_phase="none",
+    ) is None
+
+
+def test_outline_review_aligns_thread_lifecycle_to_ledger_events() -> None:
+    def updates(*, opened=(), resolved=()):
+        return {
+            "opened_thread_ids": list(opened),
+            "resolved_thread_ids": list(resolved),
+            "planted_clue_ids": [],
+            "paid_off_clue_ids": [],
+            "character_arc_changes": [],
+        }
+
+    outline = {
+        "story_plan": {
+            "plot_threads": [
+                {
+                    "thread_id": "T09",
+                    "open_event_id": "phase-1-beat-3",
+                    "resolve_event_id": "phase-24-beat-2",
+                }
+            ],
+            "foreshadowing": [],
+            "character_arcs": [],
+        },
+        "chapters": [
+            {
+                "sections": [
+                    {
+                        "subsections": [
+                            {
+                                "key_events": [{"event_id": "phase-1-beat-1"}],
+                                "planned_state_updates": updates(opened=("T09",)),
+                            },
+                            {
+                                "key_events": [{"event_id": "phase-1-beat-3"}],
+                                "planned_state_updates": updates(),
+                            },
+                            {
+                                "key_events": [{"event_id": "phase-22-beat-2"}],
+                                "planned_state_updates": updates(resolved=("T09",)),
+                            },
+                            {
+                                "key_events": [{"event_id": "phase-24-beat-2"}],
+                                "planned_state_updates": updates(resolved=("T09",)),
+                            },
+                        ]
+                    }
+                ]
+            }
+        ],
+    }
+
+    aligned = ReviewOutlineStep._align_plan_transitions(outline)
+    subsections = aligned["chapters"][0]["sections"][0]["subsections"]
+
+    assert subsections[0]["planned_state_updates"]["opened_thread_ids"] == []
+    assert subsections[1]["planned_state_updates"]["opened_thread_ids"] == ["T09"]
+    assert subsections[2]["planned_state_updates"]["resolved_thread_ids"] == []
+    assert subsections[3]["planned_state_updates"]["resolved_thread_ids"] == ["T09"]
 
 
 def test_scenario_body_length_can_be_overridden(tmp_path: Path) -> None:

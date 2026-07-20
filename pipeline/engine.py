@@ -370,6 +370,8 @@ class StepExecutionEngine:
         current_index: int,
         preferred_phase: str | None,
     ) -> int | None:
+        if preferred_phase == "none":
+            return None
         remaining = range(current_index + 1, len(plans))
         if preferred_phase is None:
             next_index = current_index + 1

@@ -59,7 +59,7 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
     assert "planned_state_updates is a binding prose contract" in prompt.text
     assert "plan_progress records already executed" in prompt.text
     assert "Aim for approximately 1200 non-whitespace characters" in prompt.text
-    assert "Accepted length is 1000 to 1600 non-whitespace characters" in prompt.text
+    assert "Accepted length is 900 to 1600 non-whitespace characters" in prompt.text
     assert '"maxItems": 1' in prompt.text
     assert '{"scenario_sections": [one target section]}' in prompt.text
 

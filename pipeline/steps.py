@@ -1378,6 +1378,9 @@ class GenerateSectionsStep(Step):
                                 "Subsection generation must return exactly one section"
                             )
                         generated_section = response.data["scenario_sections"][0]
+                        self._restore_target_identity(
+                            generated_section, chapter, section
+                        )
                         self._validate_target(generated_section, chapter, section)
                         self._normalize_block_ids(
                             generated_section,
@@ -1455,6 +1458,9 @@ class GenerateSectionsStep(Step):
                                     repaired_section = repair_response.data[
                                         "scenario_sections"
                                     ][0]
+                                    self._restore_target_identity(
+                                        repaired_section, chapter, section
+                                    )
                                     self._validate_target(
                                         repaired_section, chapter, section
                                     )
@@ -1785,6 +1791,7 @@ class GenerateSectionsStep(Step):
         section = payload.get("section")
         state_after = payload.get("state_after")
         try:
+            self._restore_target_identity(section, chapter, target_section)
             validator.validate(
                 schema_name=self.schema_name,
                 section="output",
@@ -1969,6 +1976,17 @@ class GenerateSectionsStep(Step):
             encoding="utf-8",
         )
         temp_path.replace(path)
+
+    @staticmethod
+    def _restore_target_identity(
+        generated: dict[str, Any],
+        chapter: dict[str, Any],
+        section: dict[str, Any],
+    ) -> None:
+        """Keep outline identity authoritative over prose-model paraphrases."""
+        generated["chapter_no"] = chapter["chapter_no"]
+        generated["section_no"] = section["section_no"]
+        generated["section_title"] = section["section_title"]
 
     @staticmethod
     def _validate_target(

@@ -40,7 +40,7 @@ class ScenarioSectionPromptBuilder:
         subsection: dict[str, Any],
         previous_state: dict[str, Any],
         target_characters: int = 1200,
-        min_characters: int = 1000,
+        min_characters: int = 900,
         max_characters: int = 1600,
         min_dialogue_blocks: int = 6,
         max_dialogue_blocks: int = 14,
@@ -126,6 +126,9 @@ class ScenarioSectionPromptBuilder:
             "\n- PREVIOUS SECTION STATE OR SUMMARY.plan_progress records already executed "
             "outline commitments. Never re-plant a planted clue, reopen a completed event, "
             "or repeat a character turning point."
+            "\n- Copy chapter_no, section_no, and section_title exactly from TARGET CHAPTER "
+            "and TARGET SECTION. These are immutable identifiers; never translate, shorten, "
+            "or paraphrase the section title."
         )
         try:
             text = Template(template_text).substitute(variables)

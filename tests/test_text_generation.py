@@ -19,7 +19,7 @@ from pipeline.text_generation import (
     resolve_api_key,
 )
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
-from pipeline.steps import build_minimal_steps
+from pipeline.steps import GenerateSectionsStep, build_minimal_steps
 
 
 class FailSecondSectionProvider(TextGenerationProvider):
@@ -36,6 +36,26 @@ class FailSecondSectionProvider(TextGenerationProvider):
             model=model,
             temperature=temperature,
         )
+
+
+def test_section_generation_restores_immutable_target_identity() -> None:
+    generated = {
+        "chapter_no": 99,
+        "section_no": 99,
+        "section_title": "Paraphrased title",
+    }
+
+    GenerateSectionsStep._restore_target_identity(
+        generated,
+        {"chapter_no": 2},
+        {"section_no": 2, "section_title": "受話器が示すもう一人"},
+    )
+
+    assert generated == {
+        "chapter_no": 2,
+        "section_no": 2,
+        "section_title": "受話器が示すもう一人",
+    }
 
 
 class InvalidFormatOnceProvider(TextGenerationProvider):

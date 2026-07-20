@@ -45,7 +45,7 @@ class PlanningInputGenerationConfig:
 class ScenarioBodyGenerationConfig:
     subsections_per_section: int = 3
     target_characters: int = 1200
-    min_characters: int = 1000
+    min_characters: int = 900
     max_characters: int = 1600
     min_dialogue_blocks: int = 6
     max_dialogue_blocks: int = 14

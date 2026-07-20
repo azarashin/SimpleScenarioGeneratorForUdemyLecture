@@ -4,10 +4,15 @@ import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from .errors import ConsistencyCheckError
 from .text_generation import _scenario_section_response_schema
 from .types import Step, StepContext, StepResult
+
+
+class OutlineReviewUnitExhausted(RuntimeError):
+    """Raised after one outline review unit has exhausted feedback retries."""
 
 
 def _review_report_schema() -> dict[str, Any]:
@@ -97,74 +102,500 @@ class ReviewOutlineStep(Step):
         outline_schema = json.loads(
             (schemas_dir / "scenario-outline.schema.json").read_text(encoding="utf-8")
         )
-        response_schema = {
+        api_outline_schema = _inline_common_refs(outline_schema, schemas_dir)
+        story_plan_schema = api_outline_schema["properties"]["story_plan"]
+        chapter_schema = api_outline_schema["properties"]["chapters"]["items"]
+        plan_response_schema = {
             "type": "object",
-            "required": ["review_report", "scenario_outline"],
+            "required": ["review_report", "story_plan"],
             "additionalProperties": False,
             "properties": {
                 "review_report": _review_report_schema(),
-                "scenario_outline": _inline_common_refs(outline_schema, schemas_dir),
+                "story_plan": story_plan_schema,
             },
         }
-        prompt = (
-            "Review and REWRITE this complete scenario outline before prose generation.\n"
+        shared_input = context.shared_data["input"]
+        profiles = context.shared_data["character_profiles"]
+        draft_outline = context.shared_data["scenario_outline"]
+        plan_prompt = (
+            "Design and review the global story ledger before prose generation.\n"
             "This is a repair step, not a rejection-only audit. Generic placeholders, empty "
-            "planning ledgers, repeated state descriptions, and missing concrete story details "
-            "are defects you MUST repair in the returned scenario_outline. They are not reasons "
-            "to return the input unchanged or set passed=false. Return passed=true after making "
-            "all repairs that can be derived from PLANNING INPUT and CHARACTER PROFILES. Set "
+            "planning ledgers, and missing concrete story details are defects you MUST repair in "
+            "the returned story_plan. Return passed=true after making all repairs that can be "
+            "derived from PLANNING INPUT and CHARACTER PROFILES. Set "
             "passed=false only for a genuine contradiction in those authoritative inputs that "
-            "cannot be resolved without a human decision. The report must assess the REVISED "
-            "outline, never the submitted draft.\n\n"
-            f"PLANNING INPUT\n{json.dumps(context.shared_data['input'], ensure_ascii=False, indent=2)}\n\n"
-            f"CHARACTER PROFILES\n{json.dumps(context.shared_data['character_profiles'], ensure_ascii=False, indent=2)}\n\n"
-            f"OUTLINE\n{json.dumps(context.shared_data['scenario_outline'], ensure_ascii=False, indent=2)}\n\n"
-            "Check story order, must_include and must_avoid constraints, chapter/section purpose, "
-            "character introduction timing, repeated beats, and concrete causally connected events. "
-            "Replace generic event descriptions with specific story events. Preserve title exactly as "
-            "PLANNING INPUT.scenario_idea.title and preserve logline exactly as "
-            "PLANNING INPUT.scenario_idea.premise; do not paraphrase either value. Preserve every event_id, "
-            "chapter/section/subsection number, configured counts, and valid character IDs. Each "
-            "subsection must have a distinct start state, irreversible change, end state, and handoff. "
-            "Do not invent an extra central case when the planning input already assigns cases to chapters. "
-            "Build story_plan before approving the outline: inventory plot threads, foreshadowing, and "
-            "character arcs with valid event IDs and chronological plant/open/turn/payoff/resolve points. "
-            "Populate each subsection's planned_state_updates with concrete state changes. Every ledger "
-            "opening, resolution, planting, payoff, and character turning point must appear in the matching "
-            "subsection. Ensure each resulting_state_summary can serve as the next subsection's starting "
-            "condition without replaying the previous scene. Replace every English planning placeholder "
-            "such as 'Establish the changed situation' with a story-specific event written in the same "
-            "language as the planning input. Do not report a placeholder as a finding unless it remains "
-            "in the revised output; remove it by rewriting the outline instead."
+            "cannot be resolved without a human decision.\n\n"
+            f"PLANNING INPUT\n{json.dumps(shared_input, ensure_ascii=False, indent=2)}\n\n"
+            f"CHARACTER PROFILES\n{json.dumps(profiles, ensure_ascii=False, indent=2)}\n\n"
+            f"DRAFT OUTLINE EVENT MAP\n{json.dumps(self._event_map(draft_outline), ensure_ascii=False, indent=2)}\n\n"
+            "Inventory every continuing plot thread, planted clue and payoff, and character "
+            "arc. Use only event IDs from DRAFT OUTLINE EVENT MAP. Open/plant/turn events must "
+            "precede resolve/payoff events. Cover the complete story, not only early chapters."
         )
-        response = context.text_generation_provider.generate_json(
-            prompt=prompt,
-            model=context.config.text_generation.model,
-            temperature=context.config.temperature_for(self.name),
-            response_schema=response_schema,
-            response_name="scenario_outline_review",
+        plan_data, plan_metrics = self._generate_review_unit(
+            context=context,
+            unit_key="story-plan",
+            prompt=plan_prompt,
+            response_schema=plan_response_schema,
+            response_name="scenario_story_plan_review",
+            transform=lambda data: self._validated_story_plan(data),
         )
-        report = response.data["review_report"]
-        if not report["passed"]:
-            problems = "; ".join(item["problem"] for item in report["findings"])
-            raise ValueError(f"Reviewed outline still has unresolved issues: {problems}")
-        reviewed_outline = self._restore_immutable_fields(
-            response.data["scenario_outline"],
-            context.shared_data["input"]["scenario_idea"],
-        )
+        reports = [plan_data["review_report"]]
+        story_plan = plan_data["value"]
+        reviewed_chapters: list[dict[str, Any]] = []
+        prompts = [plan_prompt]
+        input_tokens = plan_metrics["input_tokens"]
+        output_tokens = plan_metrics["output_tokens"]
+        last_model = plan_metrics["model"]
+
+        chapter_response_schema = {
+            "type": "object",
+            "required": ["review_report", "chapter"],
+            "additionalProperties": False,
+            "properties": {
+                "review_report": _review_report_schema(),
+                "chapter": chapter_schema,
+            },
+        }
+        for draft_chapter in draft_outline["chapters"]:
+            chapter_no = draft_chapter["chapter_no"]
+            chapter_prompt = self._chapter_prompt(
+                shared_input=shared_input,
+                profiles=profiles,
+                story_plan=story_plan,
+                previous_chapter=(reviewed_chapters[-1] if reviewed_chapters else None),
+                draft_chapter=draft_chapter,
+            )
+            chapter_data, chapter_metrics = self._generate_review_unit(
+                context=context,
+                unit_key=f"chapter-{chapter_no:03d}",
+                prompt=chapter_prompt,
+                response_schema=chapter_response_schema,
+                response_name=f"scenario_outline_chapter_{chapter_no}_review",
+                transform=lambda data, draft=draft_chapter, number=chapter_no: (
+                    self._validated_chapter(data, draft, number)
+                ),
+            )
+            reviewed_chapters.append(chapter_data["value"])
+            reports.append(chapter_data["review_report"])
+            prompts.append(chapter_prompt)
+            input_tokens += chapter_metrics["input_tokens"]
+            output_tokens += chapter_metrics["output_tokens"]
+            last_model = chapter_metrics["model"]
+
+        reviewed_outline = {
+            "title": shared_input["scenario_idea"]["title"],
+            "logline": shared_input["scenario_idea"]["premise"],
+            "story_plan": story_plan,
+            "chapters": reviewed_chapters,
+        }
+        reviewed_outline = self._align_plan_transitions(reviewed_outline)
+        report = self._aggregate_reports(reports)
+        combined_prompt = "\n\n--- NEXT OUTLINE REVIEW UNIT ---\n\n".join(prompts)
         return StepResult(
             output={
                 "scenario_outline": reviewed_outline,
                 "outline_review_report": report,
             },
-            prompt=prompt,
-            prompt_version="v1",
-            prompt_hash=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-            model=response.model,
+            prompt=combined_prompt,
+            prompt_version="v2",
+            prompt_hash=hashlib.sha256(combined_prompt.encode("utf-8")).hexdigest(),
+            model=last_model,
             temperature=context.config.temperature_for(self.name),
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            metadata={"review_unit_count": len(prompts)},
         )
+
+    @staticmethod
+    def _event_map(outline: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            {
+                "chapter_no": chapter["chapter_no"],
+                "section_no": section["section_no"],
+                "event_ids": [event["event_id"] for event in section["key_events"]],
+            }
+            for chapter in outline["chapters"]
+            for section in chapter["sections"]
+        ]
+
+    @staticmethod
+    def _align_plan_transitions(outline: dict[str, Any]) -> dict[str, Any]:
+        """Place thread/clue lifecycle IDs at their authoritative ledger events."""
+        aligned = deepcopy(outline)
+        updates_by_event: dict[str, dict[str, Any]] = {}
+        arc_characters = {
+            arc["character_id"] for arc in aligned["story_plan"]["character_arcs"]
+        }
+        arc_descriptions: dict[str, list[str]] = {
+            character_id: [] for character_id in arc_characters
+        }
+        for chapter in aligned["chapters"]:
+            for section in chapter["sections"]:
+                for subsection in section.get("subsections", []):
+                    updates = subsection["planned_state_updates"]
+                    updates["opened_thread_ids"] = []
+                    updates["resolved_thread_ids"] = []
+                    updates["planted_clue_ids"] = []
+                    updates["paid_off_clue_ids"] = []
+                    for change in updates["character_arc_changes"]:
+                        character_id = change["character_id"]
+                        if character_id in arc_descriptions:
+                            arc_descriptions[character_id].append(
+                                change["description"]
+                            )
+                    updates["character_arc_changes"] = [
+                        change
+                        for change in updates["character_arc_changes"]
+                        if change["character_id"] not in arc_characters
+                    ]
+                    for event in subsection["key_events"]:
+                        updates_by_event[event["event_id"]] = updates
+
+        for thread in aligned["story_plan"]["plot_threads"]:
+            open_updates = updates_by_event.get(thread["open_event_id"])
+            if open_updates is None:
+                raise ValueError(
+                    f"Plot thread {thread['thread_id']} references unknown open event "
+                    f"{thread['open_event_id']}"
+                )
+            open_updates["opened_thread_ids"].append(
+                thread["thread_id"]
+            )
+            if thread["resolve_event_id"] is not None:
+                resolve_updates = updates_by_event.get(thread["resolve_event_id"])
+                if resolve_updates is None:
+                    raise ValueError(
+                        f"Plot thread {thread['thread_id']} references unknown resolve "
+                        f"event {thread['resolve_event_id']}"
+                    )
+                resolve_updates["resolved_thread_ids"].append(thread["thread_id"])
+        for clue in aligned["story_plan"]["foreshadowing"]:
+            plant_updates = updates_by_event.get(clue["plant_event_id"])
+            payoff_updates = updates_by_event.get(clue["payoff_event_id"])
+            if plant_updates is None or payoff_updates is None:
+                raise ValueError(
+                    f"Foreshadow {clue['clue_id']} references an unknown plant or "
+                    "payoff event"
+                )
+            plant_updates["planted_clue_ids"].append(
+                clue["clue_id"]
+            )
+            payoff_updates["paid_off_clue_ids"].append(
+                clue["clue_id"]
+            )
+        for arc in aligned["story_plan"]["character_arcs"]:
+            descriptions = arc_descriptions[arc["character_id"]]
+            for index, event_id in enumerate(arc["turning_event_ids"]):
+                turning_updates = updates_by_event.get(event_id)
+                if turning_updates is None:
+                    raise ValueError(
+                        f"Character arc {arc['character_id']} references unknown turning "
+                        f"event {event_id}"
+                    )
+                description = (
+                    descriptions[index]
+                    if index < len(descriptions)
+                    else (
+                        f"{arc['character_id']} changes from {arc['initial_state']} "
+                        f"toward {arc['final_state']}."
+                    )
+                )
+                turning_updates["character_arc_changes"].append(
+                    {
+                        "character_id": arc["character_id"],
+                        "description": description,
+                    }
+                )
+        return aligned
+
+    @staticmethod
+    def _require_passed(report: dict[str, Any], unit: str) -> None:
+        if report["passed"]:
+            return
+        problems = "; ".join(item["problem"] for item in report["findings"])
+        raise ValueError(f"Reviewed {unit} still has unresolved issues: {problems}")
+
+    @classmethod
+    def _validated_story_plan(cls, data: dict[str, Any]) -> dict[str, Any]:
+        cls._require_passed(data["review_report"], "global story plan")
+        return data["story_plan"]
+
+    @classmethod
+    def _validated_chapter(
+        cls, data: dict[str, Any], draft: dict[str, Any], chapter_no: int
+    ) -> dict[str, Any]:
+        cls._require_passed(data["review_report"], f"chapter {chapter_no}")
+        return cls._restore_chapter_identity(data["chapter"], draft)
+
+    def _generate_review_unit(
+        self,
+        *,
+        context: StepContext,
+        unit_key: str,
+        prompt: str,
+        response_schema: dict[str, Any],
+        response_name: str,
+        transform: Callable[[dict[str, Any]], Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Retry and checkpoint one review unit with its exact validation feedback."""
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "prompt": prompt,
+                    "model": context.config.text_generation.model,
+                    "schema": response_schema,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        checkpoint_dir = Path(context.artifacts_dir) / "outline-review-units"
+        checkpoint_path = checkpoint_dir / f"{unit_key}.json"
+        if checkpoint_path.exists() and not context.force:
+            try:
+                checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                if checkpoint.get("fingerprint") == fingerprint:
+                    data = checkpoint["response"]
+                    value = transform(data)
+                    context.trace_logger.log(
+                        {
+                            "run_id": context.run_id,
+                            "step": self.name,
+                            "event": "outline_review_unit_checkpoint_loaded",
+                            "unit": unit_key,
+                        }
+                    )
+                    return {
+                        "review_report": data["review_report"],
+                        "value": value,
+                    }, {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "model": context.config.text_generation.model,
+                    }
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                context.trace_logger.log(
+                    {
+                        "run_id": context.run_id,
+                        "step": self.name,
+                        "event": "outline_review_unit_checkpoint_rejected",
+                        "unit": unit_key,
+                        "failure_reason": str(exc),
+                    }
+                )
+
+        strategy = context.config.retry_strategy
+        phases = ["initial"]
+        phases.extend("short_retry" for _ in range(strategy.short_retries))
+        phases.extend(
+            "prompt_revision" for _ in range(strategy.prompt_revision_retries)
+        )
+        if strategy.fallback_enabled:
+            phases.append("fallback")
+        failure_reason = ""
+        input_tokens = 0
+        output_tokens = 0
+        for attempt, phase in enumerate(phases, start=1):
+            attempt_prompt = prompt
+            if failure_reason:
+                attempt_prompt += (
+                    "\n\nPREVIOUS ATTEMPT VALIDATION FAILURE\n"
+                    f"{failure_reason}\n\n"
+                    "Correct this exact failure. Return the complete requested unit, not a "
+                    "partial patch or summary. Recount every required array before responding."
+                )
+            context.trace_logger.log(
+                {
+                    "run_id": context.run_id,
+                    "step": self.name,
+                    "event": "outline_review_unit_started",
+                    "unit": unit_key,
+                    "unit_attempt": attempt,
+                    "retry_phase": phase,
+                    "previous_failure_reason": failure_reason or None,
+                }
+            )
+            try:
+                response = context.text_generation_provider.generate_json(
+                    prompt=attempt_prompt,
+                    model=context.config.text_generation.model,
+                    temperature=context.config.temperature_for(self.name),
+                    response_schema=response_schema,
+                    response_name=response_name,
+                )
+                input_tokens += response.input_tokens or 0
+                output_tokens += response.output_tokens or 0
+                value = transform(response.data)
+            except Exception as exc:  # noqa: BLE001
+                failure_reason = str(exc)
+                context.trace_logger.log(
+                    {
+                        "run_id": context.run_id,
+                        "step": self.name,
+                        "event": "outline_review_unit_failed",
+                        "unit": unit_key,
+                        "unit_attempt": attempt,
+                        "retry_phase": phase,
+                        "failure_reason": failure_reason,
+                    }
+                )
+                continue
+
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_temp = checkpoint_path.with_suffix(".tmp")
+            checkpoint_temp.write_text(
+                json.dumps(
+                    {"fingerprint": fingerprint, "response": response.data},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            checkpoint_temp.replace(checkpoint_path)
+            context.trace_logger.log(
+                {
+                    "run_id": context.run_id,
+                    "step": self.name,
+                    "event": "outline_review_unit_succeeded",
+                    "unit": unit_key,
+                    "unit_attempt": attempt,
+                    "retry_phase": phase,
+                }
+            )
+            return {
+                "review_report": response.data["review_report"],
+                "value": value,
+            }, {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "model": response.model,
+            }
+
+        raise OutlineReviewUnitExhausted(
+            f"Outline review unit {unit_key} exhausted {len(phases)} attempts. "
+            f"Last error: {failure_reason}"
+        )
+
+    def retry_phase_for_error(self, error: Exception) -> str | None:
+        if isinstance(error, (OutlineReviewUnitExhausted, ConsistencyCheckError)):
+            return "none"
+        return None
+
+    @staticmethod
+    def _chapter_prompt(
+        *,
+        shared_input: dict[str, Any],
+        profiles: list[dict[str, Any]],
+        story_plan: dict[str, Any],
+        previous_chapter: dict[str, Any] | None,
+        draft_chapter: dict[str, Any],
+    ) -> str:
+        return (
+            "Review and REWRITE exactly one scenario chapter before prose generation.\n"
+            "This is a repair step, not a rejection-only audit. Rewrite every generic "
+            "placeholder into a concrete, causally connected story event. Return passed=true "
+            "after repairing all issues derivable from the authoritative inputs. Set "
+            "passed=false only for an irreconcilable input contradiction.\n\n"
+            f"PLANNING INPUT\n{json.dumps(shared_input, ensure_ascii=False, indent=2)}\n\n"
+            f"CHARACTER PROFILES\n{json.dumps(profiles, ensure_ascii=False, indent=2)}\n\n"
+            f"GLOBAL STORY PLAN\n{json.dumps(story_plan, ensure_ascii=False, indent=2)}\n\n"
+            f"PREVIOUS REVIEWED CHAPTER\n{json.dumps(previous_chapter, ensure_ascii=False, indent=2)}\n\n"
+            f"DRAFT CHAPTER\n{json.dumps(draft_chapter, ensure_ascii=False, indent=2)}\n\n"
+            "Return this chapter only. Preserve its chapter number, every section and "
+            "subsection count, all ordering, and every event_id. Preserve valid character "
+            "IDs. Give every section a chapter-specific purpose and every subsection a "
+            "distinct start state, irreversible state change, resulting state, and handoff. "
+            "Populate planned_state_updates so every GLOBAL STORY PLAN thread opening, "
+            "resolution, clue plant, clue payoff, and character turning point assigned to "
+            "this chapter appears at its declared event ID. Ensure the first state follows "
+            "PREVIOUS REVIEWED CHAPTER and later states never replay completed scenes. Do "
+            "not invent an extra central case when PLANNING INPUT assigns cases to chapters."
+        )
+
+    @staticmethod
+    def _restore_chapter_identity(
+        reviewed: dict[str, Any], draft: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Restore structural IDs and reject incomplete chapter responses."""
+        restored = deepcopy(reviewed)
+        if len(restored["sections"]) != len(draft["sections"]):
+            raise ValueError(
+                f"Reviewed chapter {draft['chapter_no']} returned "
+                f"{len(restored['sections'])} sections; expected {len(draft['sections'])}"
+            )
+        restored["chapter_no"] = draft["chapter_no"]
+        for reviewed_section, draft_section in zip(
+            restored["sections"], draft["sections"], strict=True
+        ):
+            reviewed_section["section_no"] = draft_section["section_no"]
+            draft_subsections = draft_section.get("subsections", [])
+            reviewed_subsections = reviewed_section.get("subsections", [])
+            if len(reviewed_subsections) != len(draft_subsections):
+                raise ValueError(
+                    f"Reviewed chapter {draft['chapter_no']} section "
+                    f"{draft_section['section_no']} returned {len(reviewed_subsections)} "
+                    f"subsections; expected {len(draft_subsections)}"
+                )
+            if len(reviewed_section["key_events"]) != len(
+                draft_section["key_events"]
+            ):
+                raise ValueError(
+                    f"Reviewed chapter {draft['chapter_no']} section "
+                    f"{draft_section['section_no']} changed the event count"
+                )
+            for reviewed_event, draft_event in zip(
+                reviewed_section["key_events"],
+                draft_section["key_events"],
+                strict=True,
+            ):
+                reviewed_event["event_id"] = draft_event["event_id"]
+            for reviewed_subsection, draft_subsection in zip(
+                reviewed_subsections, draft_subsections, strict=True
+            ):
+                reviewed_subsection["subsection_no"] = draft_subsection[
+                    "subsection_no"
+                ]
+                if len(reviewed_subsection["key_events"]) != len(
+                    draft_subsection["key_events"]
+                ):
+                    raise ValueError(
+                        f"Reviewed chapter {draft['chapter_no']} section "
+                        f"{draft_section['section_no']} subsection "
+                        f"{draft_subsection['subsection_no']} changed the event count"
+                    )
+                for reviewed_event, draft_event in zip(
+                    reviewed_subsection["key_events"],
+                    draft_subsection["key_events"],
+                    strict=True,
+                ):
+                    reviewed_event["event_id"] = draft_event["event_id"]
+                state_event_id = draft_subsection["state_change"]["event_id"]
+                reviewed_subsection["state_change"] = deepcopy(
+                    next(
+                        event
+                        for event in reviewed_subsection["key_events"]
+                        if event["event_id"] == state_event_id
+                    )
+                )
+        return restored
+
+    @staticmethod
+    def _aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
+        scope_order = {"none": 0, "local": 1, "section": 2, "outline": 3}
+        return {
+            "passed": all(report["passed"] for report in reports),
+            "score": min(report["score"] for report in reports),
+            "repair_scope": max(
+                (report["repair_scope"] for report in reports),
+                key=scope_order.__getitem__,
+            ),
+            "findings": [
+                finding
+                for report in reports
+                for finding in report["findings"]
+            ],
+        }
 
     @staticmethod
     def _restore_immutable_fields(
