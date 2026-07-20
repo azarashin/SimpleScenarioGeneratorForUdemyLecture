@@ -405,7 +405,10 @@ class PipelineConsistencyChecker:
                         f"chapter {chapter['chapter_no']} section {section['section_no']} "
                         f"references unknown characters: {sorted(unknown)}"
                     )
-                if len(section["key_events"]) != len(set(section["key_events"])):
+                section_event_ids = [
+                    event["event_id"] for event in section["key_events"]
+                ]
+                if len(section_event_ids) != len(set(section_event_ids)):
                     self._fail(
                         f"chapter {chapter['chapter_no']} section "
                         f"{section['section_no']} contains repeated key events"
@@ -420,19 +423,19 @@ class PipelineConsistencyChecker:
                             f"{section['section_no']} subsection timeline"
                         ),
                     )
-                    subsection_events = {
-                        event for item in subsections for event in item["key_events"]
-                    }
-                    all_subsection_events = [
-                        event for item in subsections for event in item["key_events"]
+                    all_subsection_event_ids = [
+                        event["event_id"]
+                        for item in subsections
+                        for event in item["key_events"]
                     ]
-                    if len(all_subsection_events) != len(set(all_subsection_events)):
+                    if len(all_subsection_event_ids) != len(
+                        set(all_subsection_event_ids)
+                    ):
                         self._fail(
                             f"chapter {chapter['chapter_no']} section "
                             f"{section['section_no']} recycles events across subsections"
                         )
-                    section_events = set(section["key_events"])
-                    if subsection_events != section_events:
+                    if set(all_subsection_event_ids) != set(section_event_ids):
                         self._fail(
                             f"chapter {chapter['chapter_no']} section "
                             f"{section['section_no']} subsection events differ from "

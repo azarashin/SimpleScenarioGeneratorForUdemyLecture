@@ -45,6 +45,7 @@ def _state_updates():
         "introduced_entities": [],
         "unresolved_plot_threads": [],
         "resolved_plot_threads": [],
+        "completed_event_ids": [],
         "continuity_summary": "葵が立ち上がり、対話を続けた。",
     }
 

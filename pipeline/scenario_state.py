@@ -74,12 +74,16 @@ def advance_scenario_state(
     )
 
     occurred_events = list(state["occurred_events"])
+    completed_event_ids = set(updates["completed_event_ids"])
     for event in outline_section["key_events"]:
+        if event["event_id"] not in completed_event_ids:
+            continue
         event_record = {
             "chapter_no": chapter_no,
             "section_no": outline_section["section_no"],
             "subsection_no": subsection_no,
-            "event": event,
+            "event_id": event["event_id"],
+            "description": event["description"],
         }
         if event_record not in occurred_events:
             occurred_events.append(event_record)

@@ -256,8 +256,10 @@ def test_section_is_generated_as_subsections_and_merged(make_context) -> None:
     outline_subsections = output["scenario_outline"]["chapters"][0]["sections"][0][
         "subsections"
     ]
-    subsection_events = [item["key_events"][0] for item in outline_subsections]
-    assert len(subsection_events) == len(set(subsection_events)) == 3
+    subsection_event_ids = [
+        item["key_events"][0]["event_id"] for item in outline_subsections
+    ]
+    assert len(subsection_event_ids) == len(set(subsection_event_ids)) == 3
     assert all(item["state_change"] in item["key_events"] for item in outline_subsections)
     assert all(item["must_not_repeat"] for item in outline_subsections)
     checkpoints = list(
@@ -337,6 +339,7 @@ def test_openai_provider_uses_responses_api_and_parses_json() -> None:
         "introduced_entities",
         "unresolved_plot_threads",
         "resolved_plot_threads",
+        "completed_event_ids",
         "continuity_summary",
     }
 

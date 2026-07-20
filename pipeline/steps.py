@@ -389,20 +389,30 @@ class GenerateOutlineStep(Step):
                                 "Begin after the cumulative recent_context; the prior "
                                 "section is already complete."
                                 if previous_event is None
-                                else f"The outcome '{previous_event}' is already complete."
+                                else (
+                                    "The previous outcome is already complete: "
+                                    f"{previous_event['description']}"
+                                )
                             ),
                             "state_change": event,
                             "end_state": (
-                                f"Complete '{event}' and hand off to '{next_event}'."
+                                f"Complete '{event['description']}' and hand off to "
+                                f"'{next_event['description']}'."
                                 if next_event is not None
-                                else f"Complete '{event}' and establish the next section state."
+                                else (
+                                    f"Complete '{event['description']}' and establish "
+                                    "the next section state."
+                                )
                             ),
                             "must_not_repeat": [
                                 "Do not restart the section introduction or repeat prior setup.",
                                 (
                                     "Do not replay the previous section's completed action."
                                     if previous_event is None
-                                    else f"Do not replay or re-explain '{previous_event}'."
+                                    else (
+                                        "Do not replay or re-explain the previous change: "
+                                        f"{previous_event['description']}"
+                                    )
                                 ),
                             ],
                         }
@@ -447,8 +457,8 @@ class GenerateOutlineStep(Step):
 
     @staticmethod
     def _events_for_subsection(
-        events: list[str], count: int, subsection_no: int
-    ) -> list[str]:
+        events: list[dict[str, str]], count: int, subsection_no: int
+    ) -> list[dict[str, str]]:
         if count > len(events):
             raise ValueError(
                 "Cannot assign subsection events by recycling completed events: "
@@ -465,7 +475,9 @@ class GenerateOutlineStep(Step):
         raise ValueError(f"No unique event is available for subsection {subsection_no}")
 
     @staticmethod
-    def _unique_beat_event(phase: int, beat_no: int, beat_count: int) -> str:
+    def _unique_beat_event(
+        phase: int, beat_no: int, beat_count: int
+    ) -> dict[str, str]:
         beat_roles = (
             "establish the changed situation",
             "introduce a concrete obstacle",
@@ -478,7 +490,10 @@ class GenerateOutlineStep(Step):
             len(beat_roles) - 1,
             (beat_no - 1) * len(beat_roles) // max(1, beat_count),
         )
-        return f"phase-{phase}-beat-{beat_no}-{beat_roles[role_index]}"
+        return {
+            "event_id": f"phase-{phase}-beat-{beat_no}",
+            "description": f"{beat_roles[role_index].capitalize()}.",
+        }
 
     @classmethod
     def _plan_participation(
@@ -1592,20 +1607,27 @@ class GenerateSectionsStep(Step):
                 "start_state": (
                     "Begin after the cumulative recent_context."
                     if previous_event is None
-                    else f"The outcome '{previous_event}' is already complete."
+                    else (
+                        "The previous outcome is already complete: "
+                        f"{previous_event['description']}"
+                    )
                 ),
                 "state_change": event,
                 "end_state": (
-                    f"Complete '{event}' and hand off to '{next_event}'."
+                    f"Complete '{event['description']}' and hand off to "
+                    f"'{next_event['description']}'."
                     if next_event is not None
-                    else f"Complete '{event}' and establish the next section state."
+                    else (
+                        f"Complete '{event['description']}' and establish the next "
+                        "section state."
+                    )
                 ),
                 "must_not_repeat": [
                     "Do not restart prior setup.",
                     (
                         "Do not replay the previous section."
                         if previous_event is None
-                        else f"Do not replay '{previous_event}'."
+                        else f"Do not replay '{previous_event['description']}'."
                     ),
                 ],
             })
@@ -1634,6 +1656,7 @@ class GenerateSectionsStep(Step):
                 "introduced_entities": [],
                 "unresolved_plot_threads": [],
                 "resolved_plot_threads": [],
+                "completed_event_ids": [],
                 "continuity_summary": updates["continuity_summary"],
             }
 
@@ -1653,6 +1676,7 @@ class GenerateSectionsStep(Step):
             "relationship_changes",
             "unresolved_plot_threads",
             "resolved_plot_threads",
+            "completed_event_ids",
         ):
             accumulated[field] = list(
                 dict.fromkeys([*accumulated[field], *updates[field]])
@@ -1759,14 +1783,17 @@ class GenerateSectionsStep(Step):
         previous_state: dict[str, Any],
         target_section: dict[str, Any],
     ) -> None:
-        completed_events = {
-            item["event"] for item in previous_state.get("occurred_events", [])
+        completed_event_ids = {
+            item["event_id"] for item in previous_state.get("occurred_events", [])
         }
-        repeated_events = set(target_section["key_events"]) & completed_events
-        if repeated_events:
+        target_event_ids = {
+            event["event_id"] for event in target_section["key_events"]
+        }
+        repeated_event_ids = target_event_ids & completed_event_ids
+        if repeated_event_ids:
             raise ValueError(
                 "Subsection target attempts to replay completed events: "
-                f"{sorted(repeated_events)}"
+                f"{sorted(repeated_event_ids)}"
             )
 
         body_text = "".join(
@@ -1774,15 +1801,15 @@ class GenerateSectionsStep(Step):
             for block in generated_section.get("narrative_blocks", [])
         )
         normalized_body = re.sub(r"\s+", "", body_text).casefold()
-        replayed_in_body = {
-            event
-            for event in completed_events
-            if re.sub(r"\s+", "", str(event)).casefold() in normalized_body
+        leaked_event_ids = {
+            event_id
+            for event_id in completed_event_ids | target_event_ids
+            if re.sub(r"\s+", "", event_id).casefold() in normalized_body
         }
-        if replayed_in_body:
+        if leaked_event_ids:
             raise ValueError(
-                "Subsection body repeats completed event markers: "
-                f"{sorted(replayed_in_body)}"
+                "Subsection body exposes internal event IDs: "
+                f"{sorted(leaked_event_ids)}"
             )
 
         previous_summary = previous_state.get("recent_context")

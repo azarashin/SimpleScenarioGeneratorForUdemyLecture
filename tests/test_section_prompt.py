@@ -41,7 +41,9 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
     assert context.shared_data["input"]["scenario_idea"]["theme"] in prompt.text
     assert context.shared_data["input"]["scenario_idea"]["premise"] in prompt.text
     assert section["section_purpose"] in prompt.text
-    assert all(event in prompt.text for event in section["key_events"])
+    assert all(
+        event["description"] in prompt.text for event in section["key_events"]
+    )
     assert section["participating_characters"][0] in prompt.text
     assert "the key is missing" in prompt.text
     assert "scenario-sections.schema.json" in prompt.text
@@ -74,7 +76,19 @@ def test_section_prompt_rejects_unknown_participating_character(make_context) ->
                 "subsection_no": 1,
                 "subsection_title": "Beat",
                 "subsection_purpose": "Test",
-                "key_events": ["event"],
+                "key_events": [
+                    {
+                        "event_id": "phase-1-beat-1",
+                        "description": "A new event occurs.",
+                    }
+                ],
+                "start_state": "The previous scene is complete.",
+                "state_change": {
+                    "event_id": "phase-1-beat-1",
+                    "description": "A new event occurs.",
+                },
+                "end_state": "The event is complete.",
+                "must_not_repeat": ["Do not replay the previous scene."],
             },
             previous_state={},
             version="v2",

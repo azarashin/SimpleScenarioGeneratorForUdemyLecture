@@ -398,9 +398,12 @@ def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
     assert len({section["section_purpose"] for section in outline_sections}) == len(
         outline_sections
     )
-    assert len({tuple(section["key_events"]) for section in outline_sections}) == len(
-        outline_sections
-    )
+    assert len(
+        {
+            tuple(event["event_id"] for event in section["key_events"])
+            for section in outline_sections
+        }
+    ) == len(outline_sections)
 
 
 def test_scenario_body_quality_checks_length_and_required_events(make_context) -> None:
@@ -418,7 +421,11 @@ def test_scenario_body_quality_checks_length_and_required_events(make_context) -
         <= body_config.max_characters * subsection_count
     )
     required_events = output["scenario_outline"]["chapters"][0]["sections"][0]["key_events"]
-    assert all(event in combined for event in required_events)
+    required_event_ids = {event["event_id"] for event in required_events}
+    assert not any(event_id in combined for event_id in required_event_ids)
+    assert required_event_ids == set(
+        first_section["state_updates"]["completed_event_ids"]
+    )
 
     invalid_output = deepcopy(output)
     invalid_output["scenario_sections"][0]["narrative_blocks"][0]["text"] = "too short"
@@ -440,10 +447,10 @@ def test_scenario_body_quality_checks_length_and_required_events(make_context) -
         )
 
     missing_event_output = deepcopy(output)
-    missing_event = required_events[0]
-    for block in missing_event_output["scenario_sections"][0]["narrative_blocks"]:
-        block["text"] = block["text"].replace(missing_event, "covered event")
-    with pytest.raises(ConsistencyCheckError, match="does not cover required events"):
+    missing_event_output["scenario_sections"][0]["state_updates"][
+        "completed_event_ids"
+    ] = []
+    with pytest.raises(ConsistencyCheckError, match="does not complete required event IDs"):
         PipelineConsistencyChecker().check(
             consistency_data,
             {"scenario_sections": missing_event_output["scenario_sections"]},
@@ -459,15 +466,20 @@ def test_mock_section_generation_advances_without_replaying_previous_event(make_
 
     output = StepExecutionEngine(build_minimal_steps()).run(context)
 
-    first_event = output["scenario_outline"]["chapters"][0]["sections"][0]["key_events"][0]
+    first_event = output["scenario_outline"]["chapters"][0]["sections"][0][
+        "key_events"
+    ][0]
     second_text = "".join(
         block["text"] for block in output["scenario_sections"][1]["narrative_blocks"]
     )
-    assert first_event not in second_text
+    assert first_event["event_id"] not in second_text
     second_event = output["scenario_outline"]["chapters"][0]["sections"][1][
         "key_events"
     ][0]
-    assert second_event in second_text
+    assert second_event["event_id"] not in second_text
+    assert second_event["event_id"] in output["scenario_sections"][1][
+        "state_updates"
+    ]["completed_event_ids"]
 
 
 def test_character_contradiction_enters_retry_strategy(make_context, base_config) -> None:
@@ -747,7 +759,11 @@ def test_outline_plans_gradual_cast_and_honors_chapter_scopes() -> None:
 def test_outline_never_recycles_events_to_fill_extra_subsections() -> None:
     with pytest.raises(ValueError, match="recycling completed events"):
         GenerateOutlineStep._events_for_subsection(
-            ["event one", "event two", "event three"],
+            [
+                {"event_id": "phase-1-beat-1", "description": "Event one."},
+                {"event_id": "phase-1-beat-2", "description": "Event two."},
+                {"event_id": "phase-1-beat-3", "description": "Event three."},
+            ],
             count=6,
             subsection_no=4,
         )
@@ -755,7 +771,12 @@ def test_outline_never_recycles_events_to_fill_extra_subsections() -> None:
 
 def test_section_progress_rejects_repeated_continuity_summary() -> None:
     previous_state = {
-        "occurred_events": [{"event": "completed setup"}],
+        "occurred_events": [
+            {
+                "event_id": "phase-1-beat-1",
+                "description": "Completed setup.",
+            }
+        ],
         "recent_context": "The pair waits outside and reviews the interview plan.",
     }
     generated = {
@@ -770,7 +791,14 @@ def test_section_progress_rejects_repeated_continuity_summary() -> None:
         GenerateSectionsStep._validate_forward_progress(
             generated,
             previous_state=previous_state,
-            target_section={"key_events": ["begin the interview"]},
+            target_section={
+                "key_events": [
+                    {
+                        "event_id": "phase-1-beat-2",
+                        "description": "Begin the interview.",
+                    }
+                ]
+            },
         )
 
 
@@ -778,20 +806,32 @@ def test_section_progress_rejects_completed_event_in_new_body() -> None:
     generated = {
         "narrative_blocks": [
             {
-                "text": "The scene once again performs completed setup before moving on."
+                "text": "The scene exposes phase-1-beat-1 before moving on."
             }
         ],
         "state_updates": {"continuity_summary": "The interview begins."},
     }
 
-    with pytest.raises(ValueError, match="repeats completed event markers"):
+    with pytest.raises(ValueError, match="exposes internal event IDs"):
         GenerateSectionsStep._validate_forward_progress(
             generated,
             previous_state={
-                "occurred_events": [{"event": "completed setup"}],
+                "occurred_events": [
+                    {
+                        "event_id": "phase-1-beat-1",
+                        "description": "Completed setup.",
+                    }
+                ],
                 "recent_context": "The setup is finished.",
             },
-            target_section={"key_events": ["begin the interview"]},
+            target_section={
+                "key_events": [
+                    {
+                        "event_id": "phase-1-beat-2",
+                        "description": "Begin the interview.",
+                    }
+                ]
+            },
         )
 
 

@@ -14,6 +14,7 @@ def _state_updates():
         "introduced_entities": [],
         "unresolved_plot_threads": [],
         "resolved_plot_threads": [],
+        "completed_event_ids": [],
         "continuity_summary": "葵が雨の中で出発を決めた。",
     }
 
@@ -47,7 +48,12 @@ def test_render_html_step_writes_pages_and_manifest(make_context):
                                 "section_no": 1,
                                 "section_title": "雨",
                                 "section_purpose": "出会う",
-                                "key_events": ["出会い"],
+                                "key_events": [
+                                    {
+                                        "event_id": "phase-1-beat-1",
+                                        "description": "二人が出会う。",
+                                    }
+                                ],
                                 "participating_characters": ["c001"],
                             }
                         ],
@@ -133,7 +139,12 @@ def test_render_html_step_auto_loads_generated_json_and_image_assets(make_contex
                                 "section_no": 1,
                                 "section_title": "雨",
                                 "section_purpose": "出会う",
-                                "key_events": ["出会い"],
+                                "key_events": [
+                                    {
+                                        "event_id": "phase-1-beat-1",
+                                        "description": "二人が出会う。",
+                                    }
+                                ],
                                 "participating_characters": ["c001"],
                             }
                         ],

@@ -162,7 +162,12 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
             chapter, _ = json.JSONDecoder().raw_decode(prompt[chapter_start:])
             chapter_no = chapter["chapter_no"]
         section_no = section["section_no"]
-        events = " / ".join(subsection["key_events"])
+        events = " / ".join(
+            event["description"] for event in subsection["key_events"]
+        )
+        completed_event_ids = [
+            event["event_id"] for event in subsection["key_events"]
+        ]
         purpose = subsection["subsection_purpose"]
         subsection_no = subsection["subsection_no"]
         previous_start = prompt.index(self.previous_state_marker) + len(
@@ -237,6 +242,7 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
                         "introduced_entities": [],
                         "unresolved_plot_threads": [],
                         "resolved_plot_threads": [],
+                        "completed_event_ids": completed_event_ids,
                         "continuity_summary": (
                             f"Chapter {chapter_no} section {section_no} beat "
                             f"{subsection_no} completed: {events}."
@@ -375,6 +381,7 @@ def _scenario_section_response_schema() -> dict[str, Any]:
             "introduced_entities",
             "unresolved_plot_threads",
             "resolved_plot_threads",
+            "completed_event_ids",
             "continuity_summary",
         ],
         "additionalProperties": False,
@@ -406,6 +413,13 @@ def _scenario_section_response_schema() -> dict[str, Any]:
             "resolved_plot_threads": {
                 "type": "array",
                 "items": non_empty_string,
+            },
+            "completed_event_ids": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "pattern": r"^phase-[0-9]+-beat-[0-9]+$",
+                },
             },
             "continuity_summary": non_empty_string,
         },

@@ -46,6 +46,7 @@ def _section() -> dict[str, object]:
             ],
             "unresolved_plot_threads": ["who sealed the archive"],
             "resolved_plot_threads": ["who sent the letter"],
+            "completed_event_ids": ["phase-1-beat-1"],
             "continuity_summary": "They reached the sealed archive with a new map.",
         },
     }
@@ -64,7 +65,15 @@ def test_scenario_state_merges_durable_updates_into_compact_state() -> None:
         initial,
         chapter_no=1,
         subsection_no=1,
-        outline_section={"section_no": 1, "key_events": ["library arrival"]},
+        outline_section={
+            "section_no": 1,
+            "key_events": [
+                {
+                    "event_id": "phase-1-beat-1",
+                    "description": "They arrive at the library.",
+                }
+            ],
+        },
         generated_section=section,
     )
 
@@ -81,7 +90,7 @@ def test_scenario_state_merges_durable_updates_into_compact_state() -> None:
     ]
     assert state["unresolved_plot_threads"] == ["who sealed the archive"]
     assert state["introduced_entities"][0]["entity_id"] == "place-archive"
-    assert state["occurred_events"][-1]["event"] == "library arrival"
+    assert state["occurred_events"][-1]["event_id"] == "phase-1-beat-1"
     assert state["recent_context"] == (
         "They reached the sealed archive with a new map."
     )
@@ -99,7 +108,15 @@ def test_scenario_state_rejects_updates_for_unknown_characters() -> None:
             create_initial_scenario_state({"c001", "c002"}),
             chapter_no=1,
             subsection_no=1,
-            outline_section={"section_no": 1, "key_events": ["arrival"]},
+            outline_section={
+                "section_no": 1,
+                "key_events": [
+                    {
+                        "event_id": "phase-1-beat-1",
+                        "description": "They arrive.",
+                    }
+                ],
+            },
             generated_section=section,
         )
 
