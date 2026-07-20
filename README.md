@@ -42,7 +42,24 @@ flowchart TD
     MERGE --> S05[Step 05<br/>セリフ表情タグ生成]
     S05 --> S06[Step 06<br/>HTML生成・リンクと画像パス検証]
     S06 --> OUTPUT[output/run-id/index.html 以下]
+
+    subgraph LEGEND[凡例]
+        LEGEND_HUMAN[人間による確認・編集]
+        LEGEND_PROCESS[パイプラインの処理・判定]
+        LEGEND_DATA[(入力・成果物・状態データ)]
+    end
+
+    classDef human fill:#fff3cd,stroke:#b58105,color:#4d3800,stroke-width:2px
+    classDef process fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:1.5px
+    classDef data fill:#dcfce7,stroke:#16a34a,color:#052e16,stroke-width:1.5px
+
+    class INPUT_REVIEW,INPUT_ARTIFACT,REVIEW,ARTIFACT,LEGEND_HUMAN human
+    class S00,S01,S02,S03,INIT,TARGET,PROMPT,GENERATE,CHECK,UPDATE,SUPPLEMENT,RECHECK,RETRY,FAILED,MORE,MERGE,S05,S06,LEGEND_PROCESS process
+    class IDEA,INPUT,STATE,OUTPUT,LEGEND_DATA data
 ```
+
+黄色は人間による確認・承認・編集、青色はパイプラインが自動実行する処理・判定、緑色は入力・
+累積状態・生成成果物などのデータを表します。
 
 Step 04では、過去の本文全文を次のプロンプトへ連結しません。各サブセクションが返す
 `state_updates`を累積状態へ反映し、現在地、所持品、判明事項、関係変化、登場済みの
