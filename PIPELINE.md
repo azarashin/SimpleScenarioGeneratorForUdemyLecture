@@ -29,8 +29,9 @@ HTMLは `output/<run-id>/index.html` と `chapter-N/` 以下へUTF-8で原子的
 
 `--input`で指定したファイルが正式な入力JSONでない場合、その全文を自由形式の企画メモとして
 読み込みます。`planning_input_generation.enabled=true`のとき、OpenAI Structured Outputsと
-`schemas/ai-pipeline-input.schema.json`を使って`scenario_idea`と最小限の
-`character_overviews`を生成します。
+`schemas/ai-pipeline-input.schema.json`を使って`scenario_idea`と詳細な
+`character_overviews`を生成します。人物ごとに外見、背景、性格、価値観、長所・短所、成長軸、
+話し方、人物関係、感情範囲、表情ルールまで生成し、Step 01へ引き継ぎます。
 
 成果物は`artifacts/step-00-generate-planning-input.json`へ保存され、`require_review=true`なら
 レビュー待ちで停止します。内容を確認・修正後、同じ入力ファイルとrun IDを指定し、

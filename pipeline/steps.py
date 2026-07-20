@@ -53,7 +53,13 @@ class GeneratePlanningInputStep(Step):
             "missing details needed to create an outline and character profiles. Do not import "
             "themes, terminology, or facts from unrelated requests. Character IDs must be unique "
             "lowercase identifiers such as c001, c002. must_include and must_avoid must clearly "
-            "separate requirements from prohibitions. Return only JSON matching the schema.\n\n"
+            "separate requirements from prohibitions. Generate every character attribute in the "
+            "schema with concrete story-relevant detail; do not reduce characters to names and "
+            "summaries. Differentiate their values, strengths, weaknesses, growth arcs, voices, "
+            "relationships, visual identity, and expression rules. Relationships may reference "
+            "only IDs generated in this response. emotion_range must contain neutral, and every "
+            "expression rule must use an expression in emotion_range. Return only JSON matching "
+            "the schema.\n\n"
             "FREE-FORM IDEA\n"
             f"{rough_idea}\n\n"
             "OUTPUT JSON SCHEMA\n"
@@ -82,6 +88,35 @@ class GeneratePlanningInputStep(Step):
         ]
         if len(character_ids) != len(set(character_ids)):
             raise ValueError("AI planning input contains duplicate character IDs.")
+        known_ids = set(character_ids)
+        for character in response.data["character_overviews"]:
+            character_id = character["character_id"]
+            unknown_relationship_ids = {
+                relationship["target_character_id"]
+                for relationship in character["relationships"]
+                if relationship["target_character_id"] not in known_ids
+            }
+            if unknown_relationship_ids:
+                raise ValueError(
+                    f"AI planning input character {character_id} references unknown "
+                    f"character IDs: {sorted(unknown_relationship_ids)}"
+                )
+            emotion_range = set(character["emotion_range"])
+            if "neutral" not in emotion_range:
+                raise ValueError(
+                    f"AI planning input character {character_id} emotion_range must "
+                    "include neutral."
+                )
+            unknown_rule_expressions = {
+                rule["expression"]
+                for rule in character["expression_rules"]
+                if rule["expression"] not in emotion_range
+            }
+            if unknown_rule_expressions:
+                raise ValueError(
+                    f"AI planning input character {character_id} has expression rules "
+                    f"outside emotion_range: {sorted(unknown_rule_expressions)}"
+                )
         return StepResult(
             output={"input": response.data},
             prompt=generation_prompt,
