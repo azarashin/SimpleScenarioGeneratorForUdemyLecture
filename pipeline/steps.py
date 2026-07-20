@@ -355,28 +355,58 @@ class GenerateOutlineStep(Step):
                     f"Develop the theme '{input_data['scenario_idea']['theme']}' "
                     f"through story phase {phase}"
                 )
-                key_events = [
-                    f"phase-{phase}-conflict emerges",
-                    f"phase-{phase}-choice changes the situation",
-                    f"phase-{phase}-consequence points forward",
-                ]
                 subsection_count = (
                     context.config.scenario_body_generation.subsections_per_section
                 )
-                subsections = [
-                    {
-                        "subsection_no": subsection_no,
-                        "subsection_title": f"Beat {chapter_no}-{section_no}-{subsection_no}",
-                        "subsection_purpose": (
-                            f"Advance {purpose} through beat {subsection_no} of "
-                            f"{subsection_count}"
-                        ),
-                        "key_events": self._events_for_subsection(
-                            key_events, subsection_count, subsection_no
-                        ),
-                    }
+                key_events = [
+                    self._unique_beat_event(phase, subsection_no, subsection_count)
                     for subsection_no in range(1, subsection_count + 1)
                 ]
+                subsections = []
+                for subsection_no, event in enumerate(key_events, start=1):
+                    previous_event = (
+                        key_events[subsection_no - 2]
+                        if subsection_no > 1
+                        else None
+                    )
+                    next_event = (
+                        key_events[subsection_no]
+                        if subsection_no < subsection_count
+                        else None
+                    )
+                    subsections.append(
+                        {
+                            "subsection_no": subsection_no,
+                            "subsection_title": (
+                                f"Beat {chapter_no}-{section_no}-{subsection_no}"
+                            ),
+                            "subsection_purpose": (
+                                f"Advance {purpose} by completing a new, irreversible "
+                                f"change in beat {subsection_no} of {subsection_count}"
+                            ),
+                            "key_events": [event],
+                            "start_state": (
+                                "Begin after the cumulative recent_context; the prior "
+                                "section is already complete."
+                                if previous_event is None
+                                else f"The outcome '{previous_event}' is already complete."
+                            ),
+                            "state_change": event,
+                            "end_state": (
+                                f"Complete '{event}' and hand off to '{next_event}'."
+                                if next_event is not None
+                                else f"Complete '{event}' and establish the next section state."
+                            ),
+                            "must_not_repeat": [
+                                "Do not restart the section introduction or repeat prior setup.",
+                                (
+                                    "Do not replay the previous section's completed action."
+                                    if previous_event is None
+                                    else f"Do not replay or re-explain '{previous_event}'."
+                                ),
+                            ],
+                        }
+                    )
                 sections.append(
                     {
                         "section_no": section_no,
@@ -419,6 +449,12 @@ class GenerateOutlineStep(Step):
     def _events_for_subsection(
         events: list[str], count: int, subsection_no: int
     ) -> list[str]:
+        if count > len(events):
+            raise ValueError(
+                "Cannot assign subsection events by recycling completed events: "
+                f"{count} subsections require at least {count} unique events, got "
+                f"{len(events)}"
+            )
         assigned = [
             event
             for event_index, event in enumerate(events)
@@ -426,7 +462,23 @@ class GenerateOutlineStep(Step):
         ]
         if assigned:
             return assigned
-        return [events[(subsection_no - 1) % len(events)]]
+        raise ValueError(f"No unique event is available for subsection {subsection_no}")
+
+    @staticmethod
+    def _unique_beat_event(phase: int, beat_no: int, beat_count: int) -> str:
+        beat_roles = (
+            "establish the changed situation",
+            "introduce a concrete obstacle",
+            "discover actionable information",
+            "force a consequential response",
+            "apply the consequence and escalate",
+            "commit to the next course of action",
+        )
+        role_index = min(
+            len(beat_roles) - 1,
+            (beat_no - 1) * len(beat_roles) // max(1, beat_count),
+        )
+        return f"phase-{phase}-beat-{beat_no}-{beat_roles[role_index]}"
 
     @classmethod
     def _plan_participation(
@@ -1182,6 +1234,7 @@ class GenerateSectionsStep(Step):
         for chapter in outline["chapters"]:
             for section in chapter["sections"]:
                 merged_blocks: list[dict[str, Any]] = []
+                merged_updates: dict[str, Any] | None = None
                 subsections = self._subsections_for(
                     section, quality_config.subsections_per_section
                 )
@@ -1288,6 +1341,11 @@ class GenerateSectionsStep(Step):
                             section_no=section["section_no"],
                             subsection_no=subsection_no,
                         )
+                        self._validate_forward_progress(
+                            generated_section,
+                            previous_state=previous_state,
+                            target_section=target_section,
+                        )
                         repair_input_tokens = 0
                         repair_output_tokens = 0
                         try:
@@ -1362,6 +1420,11 @@ class GenerateSectionsStep(Step):
                                         section_no=section["section_no"],
                                         subsection_no=subsection_no,
                                     )
+                                    self._validate_forward_progress(
+                                        repaired_section,
+                                        previous_state=previous_state,
+                                        target_section=target_section,
+                                    )
                                     quality_checker.check_section(
                                         generated_section=repaired_section,
                                         outline_section=target_section,
@@ -1433,6 +1496,7 @@ class GenerateSectionsStep(Step):
                         state_after = advance_scenario_state(
                             previous_state,
                             chapter_no=chapter["chapter_no"],
+                            subsection_no=subsection_no,
                             outline_section=target_section,
                             generated_section=generated_section,
                         )
@@ -1462,14 +1526,20 @@ class GenerateSectionsStep(Step):
                         input_tokens += repair_input_tokens
                         output_tokens += repair_output_tokens
                     merged_blocks.extend(generated_section["narrative_blocks"])
+                    merged_updates = self._merge_state_updates(
+                        merged_updates,
+                        generated_section["state_updates"],
+                    )
                     previous_state = state_after
+                if merged_updates is None:
+                    raise ValueError("Section generation produced no subsection updates")
                 sections_out.append(
                     {
                         "chapter_no": chapter["chapter_no"],
                         "section_no": section["section_no"],
                         "section_title": section["section_title"],
                         "narrative_blocks": merged_blocks,
-                        "state_updates": generated_section["state_updates"],
+                        "state_updates": merged_updates,
                     }
                 )
 
@@ -1504,19 +1574,42 @@ class GenerateSectionsStep(Step):
         if existing and len(existing) == count:
             return existing
         events = section["key_events"]
-        return [
-            {
+        assigned_events = [
+            GenerateOutlineStep._events_for_subsection(events, count, index)[0]
+            for index in range(1, count + 1)
+        ]
+        subsections = []
+        for index, event in enumerate(assigned_events, start=1):
+            previous_event = assigned_events[index - 2] if index > 1 else None
+            next_event = assigned_events[index] if index < count else None
+            subsections.append({
                 "subsection_no": index,
                 "subsection_title": f"Beat {section['section_no']}-{index}",
                 "subsection_purpose": (
                     f"{section['section_purpose']} (beat {index} of {count})"
                 ),
-                "key_events": GenerateOutlineStep._events_for_subsection(
-                    events, count, index
+                "key_events": [event],
+                "start_state": (
+                    "Begin after the cumulative recent_context."
+                    if previous_event is None
+                    else f"The outcome '{previous_event}' is already complete."
                 ),
-            }
-            for index in range(1, count + 1)
-        ]
+                "state_change": event,
+                "end_state": (
+                    f"Complete '{event}' and hand off to '{next_event}'."
+                    if next_event is not None
+                    else f"Complete '{event}' and establish the next section state."
+                ),
+                "must_not_repeat": [
+                    "Do not restart prior setup.",
+                    (
+                        "Do not replay the previous section."
+                        if previous_event is None
+                        else f"Do not replay '{previous_event}'."
+                    ),
+                ],
+            })
+        return subsections
 
     @staticmethod
     def _normalize_block_ids(
@@ -1526,6 +1619,46 @@ class GenerateSectionsStep(Step):
             block["block_id"] = (
                 f"b-{chapter_no}-{section_no}-{subsection_no}-{index:03d}"
             )
+
+    @staticmethod
+    def _merge_state_updates(
+        accumulated: dict[str, Any] | None,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        if accumulated is None:
+            accumulated = {
+                "character_locations": [],
+                "possessions": [],
+                "known_information": [],
+                "relationship_changes": [],
+                "introduced_entities": [],
+                "unresolved_plot_threads": [],
+                "resolved_plot_threads": [],
+                "continuity_summary": updates["continuity_summary"],
+            }
+
+        for field, identity_key in (
+            ("character_locations", "character_id"),
+            ("possessions", "character_id"),
+            ("introduced_entities", "entity_id"),
+        ):
+            by_identity = {
+                item[identity_key]: item for item in accumulated[field]
+            }
+            by_identity.update({item[identity_key]: item for item in updates[field]})
+            accumulated[field] = list(by_identity.values())
+
+        for field in (
+            "known_information",
+            "relationship_changes",
+            "unresolved_plot_threads",
+            "resolved_plot_threads",
+        ):
+            accumulated[field] = list(
+                dict.fromkeys([*accumulated[field], *updates[field]])
+            )
+        accumulated["continuity_summary"] = updates["continuity_summary"]
+        return accumulated
 
     def _write_rejected(
         self,
@@ -1609,9 +1742,71 @@ class GenerateSectionsStep(Step):
                 "section_no": target_section["section_no"],
             }:
                 raise ValueError("Checkpoint state does not match its generated section")
+            expected_subsection = int(
+                Path(path).stem.rsplit("-subsection-", 1)[-1]
+            ) if "-subsection-" in Path(path).stem else 1
+            if state_after["current_subsection"] != expected_subsection:
+                raise ValueError("Checkpoint state does not match its generated subsection")
         except (KeyError, TypeError, ValueError):
             return None
         return section, state_after
+
+    @classmethod
+    def _validate_forward_progress(
+        cls,
+        generated_section: dict[str, Any],
+        *,
+        previous_state: dict[str, Any],
+        target_section: dict[str, Any],
+    ) -> None:
+        completed_events = {
+            item["event"] for item in previous_state.get("occurred_events", [])
+        }
+        repeated_events = set(target_section["key_events"]) & completed_events
+        if repeated_events:
+            raise ValueError(
+                "Subsection target attempts to replay completed events: "
+                f"{sorted(repeated_events)}"
+            )
+
+        body_text = "".join(
+            str(block.get("text", ""))
+            for block in generated_section.get("narrative_blocks", [])
+        )
+        normalized_body = re.sub(r"\s+", "", body_text).casefold()
+        replayed_in_body = {
+            event
+            for event in completed_events
+            if re.sub(r"\s+", "", str(event)).casefold() in normalized_body
+        }
+        if replayed_in_body:
+            raise ValueError(
+                "Subsection body repeats completed event markers: "
+                f"{sorted(replayed_in_body)}"
+            )
+
+        previous_summary = previous_state.get("recent_context")
+        current_summary = generated_section["state_updates"]["continuity_summary"]
+        if previous_summary and cls._text_similarity(
+            previous_summary, current_summary
+        ) >= 0.92:
+            raise ValueError(
+                "Continuity summary is too similar to the previous scene; the "
+                "subsection must create a new state instead of replaying it"
+            )
+
+    @staticmethod
+    def _text_similarity(left: str, right: str) -> float:
+        def trigrams(value: str) -> set[str]:
+            normalized = re.sub(r"\s+", "", value).casefold()
+            if len(normalized) < 3:
+                return {normalized} if normalized else set()
+            return {normalized[index:index + 3] for index in range(len(normalized) - 2)}
+
+        left_parts = trigrams(left)
+        right_parts = trigrams(right)
+        union = left_parts | right_parts
+        return len(left_parts & right_parts) / len(union) if union else 1.0
 
     @staticmethod
     def _section_metrics(section: dict[str, Any]) -> dict[str, int]:

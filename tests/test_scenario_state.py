@@ -63,6 +63,7 @@ def test_scenario_state_merges_durable_updates_into_compact_state() -> None:
     state = advance_scenario_state(
         initial,
         chapter_no=1,
+        subsection_no=1,
         outline_section={"section_no": 1, "key_events": ["library arrival"]},
         generated_section=section,
     )
@@ -84,6 +85,7 @@ def test_scenario_state_merges_durable_updates_into_compact_state() -> None:
     assert state["recent_context"] == (
         "They reached the sealed archive with a new map."
     )
+    assert state["current_subsection"] == 1
 
 
 def test_scenario_state_rejects_updates_for_unknown_characters() -> None:
@@ -96,6 +98,7 @@ def test_scenario_state_rejects_updates_for_unknown_characters() -> None:
         advance_scenario_state(
             create_initial_scenario_state({"c001", "c002"}),
             chapter_no=1,
+            subsection_no=1,
             outline_section={"section_no": 1, "key_events": ["arrival"]},
             generated_section=section,
         )
@@ -124,7 +127,8 @@ def test_section_checkpoint_state_is_restored_and_passed_to_next_prompt(
     assert state["recent_context"] == payload["section"]["state_updates"][
         "continuity_summary"
     ]
-    assert len(state["occurred_events"]) == 3
+    assert state["current_subsection"] == 1
+    assert len(state["occurred_events"]) == 1
     assert "character_locations" in provider.requests[1].prompt
     assert payload["section"]["narrative_blocks"][0]["text"] not in (
         provider.requests[1].prompt

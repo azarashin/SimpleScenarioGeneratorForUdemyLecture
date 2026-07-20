@@ -84,7 +84,11 @@
                                             "subsection_no",
                                             "subsection_title",
                                             "subsection_purpose",
-                                            "key_events"
+                                            "key_events",
+                                            "start_state",
+                                            "state_change",
+                                            "end_state",
+                                            "must_not_repeat"
                                         ],
                                         "additionalProperties": false,
                                         "properties": {
@@ -98,6 +102,22 @@
                                                 "$ref": "common.schema.json#/$defs/nonEmptyString"
                                             },
                                             "key_events": {
+                                                "type": "array",
+                                                "minItems": 1,
+                                                "items": {
+                                                    "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                                }
+                                            },
+                                            "start_state": {
+                                                "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                            },
+                                            "state_change": {
+                                                "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                            },
+                                            "end_state": {
+                                                "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                            },
+                                            "must_not_repeat": {
                                                 "type": "array",
                                                 "minItems": 1,
                                                 "items": {

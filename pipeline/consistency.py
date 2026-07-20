@@ -405,6 +405,11 @@ class PipelineConsistencyChecker:
                         f"chapter {chapter['chapter_no']} section {section['section_no']} "
                         f"references unknown characters: {sorted(unknown)}"
                     )
+                if len(section["key_events"]) != len(set(section["key_events"])):
+                    self._fail(
+                        f"chapter {chapter['chapter_no']} section "
+                        f"{section['section_no']} contains repeated key events"
+                    )
                 subsections = section.get("subsections", [])
                 if subsections:
                     self._require_sequence(
@@ -418,13 +423,29 @@ class PipelineConsistencyChecker:
                     subsection_events = {
                         event for item in subsections for event in item["key_events"]
                     }
-                    missing_events = set(section["key_events"]) - subsection_events
-                    if missing_events:
+                    all_subsection_events = [
+                        event for item in subsections for event in item["key_events"]
+                    ]
+                    if len(all_subsection_events) != len(set(all_subsection_events)):
                         self._fail(
                             f"chapter {chapter['chapter_no']} section "
-                            f"{section['section_no']} subsections are missing events: "
-                            f"{sorted(missing_events)}"
+                            f"{section['section_no']} recycles events across subsections"
                         )
+                    section_events = set(section["key_events"])
+                    if subsection_events != section_events:
+                        self._fail(
+                            f"chapter {chapter['chapter_no']} section "
+                            f"{section['section_no']} subsection events differ from "
+                            "section events"
+                        )
+                    for subsection in subsections:
+                        if subsection["state_change"] not in subsection["key_events"]:
+                            self._fail(
+                                f"chapter {chapter['chapter_no']} section "
+                                f"{section['section_no']} subsection "
+                                f"{subsection['subsection_no']} state_change must be one "
+                                "of its key events"
+                            )
         if (
             len(valid_characters) >= 5
             and first_section_participants == valid_characters

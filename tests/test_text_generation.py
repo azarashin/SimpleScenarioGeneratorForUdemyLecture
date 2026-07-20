@@ -253,10 +253,22 @@ def test_section_is_generated_as_subsections_and_merged(make_context) -> None:
 
     assert len(output["scenario_sections"]) == 1
     assert len(provider.requests) == 3
+    outline_subsections = output["scenario_outline"]["chapters"][0]["sections"][0][
+        "subsections"
+    ]
+    subsection_events = [item["key_events"][0] for item in outline_subsections]
+    assert len(subsection_events) == len(set(subsection_events)) == 3
+    assert all(item["state_change"] in item["key_events"] for item in outline_subsections)
+    assert all(item["must_not_repeat"] for item in outline_subsections)
     checkpoints = list(
         (Path(context.artifacts_dir) / "sections").glob("*-subsection-*.json")
     )
     assert len(checkpoints) == 3
+    checkpoint_states = [
+        json.loads(path.read_text(encoding="utf-8"))["state_after"]
+        for path in sorted(checkpoints)
+    ]
+    assert [state["current_subsection"] for state in checkpoint_states] == [1, 2, 3]
     blocks = output["scenario_sections"][0]["narrative_blocks"]
     assert len({block["block_id"] for block in blocks}) == len(blocks)
     assert sum(

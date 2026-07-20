@@ -20,6 +20,7 @@ from pipeline.steps import (
     GeneratePlanningInputStep,
     GenerateCharacterProfilesStep,
     GenerateOutlineStep,
+    GenerateSectionsStep,
     build_minimal_steps,
 )
 from pipeline.state import StepState
@@ -449,7 +450,7 @@ def test_scenario_body_quality_checks_length_and_required_events(make_context) -
         )
 
 
-def test_mock_section_generation_carries_previous_section_state(make_context) -> None:
+def test_mock_section_generation_advances_without_replaying_previous_event(make_context) -> None:
     context, _ = make_context()
     context.shared_data["input"]["scenario_idea"]["target_length"] = {
         "chapter_count": 1,
@@ -462,7 +463,11 @@ def test_mock_section_generation_carries_previous_section_state(make_context) ->
     second_text = "".join(
         block["text"] for block in output["scenario_sections"][1]["narrative_blocks"]
     )
-    assert first_event in second_text
+    assert first_event not in second_text
+    second_event = output["scenario_outline"]["chapters"][0]["sections"][1][
+        "key_events"
+    ][0]
+    assert second_event in second_text
 
 
 def test_character_contradiction_enters_retry_strategy(make_context, base_config) -> None:
@@ -737,6 +742,57 @@ def test_outline_plans_gradual_cast_and_honors_chapter_scopes() -> None:
         for character_id in participants
     }
     assert appeared == {character_id for character_id, _ in roles}
+
+
+def test_outline_never_recycles_events_to_fill_extra_subsections() -> None:
+    with pytest.raises(ValueError, match="recycling completed events"):
+        GenerateOutlineStep._events_for_subsection(
+            ["event one", "event two", "event three"],
+            count=6,
+            subsection_no=4,
+        )
+
+
+def test_section_progress_rejects_repeated_continuity_summary() -> None:
+    previous_state = {
+        "occurred_events": [{"event": "completed setup"}],
+        "recent_context": "The pair waits outside and reviews the interview plan.",
+    }
+    generated = {
+        "state_updates": {
+            "continuity_summary": (
+                "The pair waits outside and reviews the interview plan."
+            )
+        }
+    }
+
+    with pytest.raises(ValueError, match="too similar to the previous scene"):
+        GenerateSectionsStep._validate_forward_progress(
+            generated,
+            previous_state=previous_state,
+            target_section={"key_events": ["begin the interview"]},
+        )
+
+
+def test_section_progress_rejects_completed_event_in_new_body() -> None:
+    generated = {
+        "narrative_blocks": [
+            {
+                "text": "The scene once again performs completed setup before moving on."
+            }
+        ],
+        "state_updates": {"continuity_summary": "The interview begins."},
+    }
+
+    with pytest.raises(ValueError, match="repeats completed event markers"):
+        GenerateSectionsStep._validate_forward_progress(
+            generated,
+            previous_state={
+                "occurred_events": [{"event": "completed setup"}],
+                "recent_context": "The setup is finished.",
+            },
+            target_section={"key_events": ["begin the interview"]},
+        )
 
 
 def test_temperature_policy_limits_diversity_to_selected_steps(make_context) -> None:

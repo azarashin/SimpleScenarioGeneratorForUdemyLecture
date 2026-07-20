@@ -104,6 +104,21 @@ class ScenarioSectionPromptBuilder:
             "concise account of the resulting situation needed by the next section. Use "
             "empty arrays or objects when there are no updates.",
         )
+        template_text += (
+            "\n- Treat PREVIOUS SECTION STATE OR SUMMARY as completed history. Start "
+            "after recent_context, never recreate its opening, preparation, discovery, "
+            "conversation, or decision.\n"
+            "- TARGET SUBSECTION.start_state is already true before the first block. "
+            "Do not dramatize it again.\n"
+            "- Complete TARGET SUBSECTION.state_change during this output and finish in "
+            "TARGET SUBSECTION.end_state. A recap or another preparation step is not a "
+            "valid state change.\n"
+            "- Obey every TARGET SUBSECTION.must_not_repeat item. Treat every event in "
+            "PREVIOUS SECTION STATE OR SUMMARY.occurred_events as completed and never "
+            "stage it again.\n"
+            "- Use at most one brief transition sentence to connect from recent_context; "
+            "spend the remaining text on new action, information, choice, or consequence."
+        )
         try:
             text = Template(template_text).substitute(variables)
         except KeyError as exc:

@@ -51,6 +51,9 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
     assert "TARGET SUBSECTION" in prompt.text
     assert "Populate state_updates with every durable fact" in prompt.text
     assert "compact cumulative state is authoritative" in prompt.text
+    assert "Start after recent_context" in prompt.text
+    assert "never recreate its opening" in prompt.text
+    assert "must_not_repeat" in prompt.text
     assert "Aim for approximately 1200 non-whitespace characters" in prompt.text
     assert "Accepted length is 1000 to 1600 non-whitespace characters" in prompt.text
     assert '"maxItems": 1' in prompt.text

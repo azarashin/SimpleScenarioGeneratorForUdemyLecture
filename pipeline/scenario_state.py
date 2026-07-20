@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 
-STATE_VERSION = 2
+STATE_VERSION = 3
 
 
 def create_initial_scenario_state(character_ids: set[str]) -> dict[str, Any]:
@@ -12,6 +12,7 @@ def create_initial_scenario_state(character_ids: set[str]) -> dict[str, Any]:
     return {
         "state_version": STATE_VERSION,
         "current_section": None,
+        "current_subsection": None,
         "character_locations": {
             character_id: None for character_id in sorted(character_ids)
         },
@@ -29,6 +30,7 @@ def advance_scenario_state(
     previous_state: dict[str, Any],
     *,
     chapter_no: int,
+    subsection_no: int,
     outline_section: dict[str, Any],
     generated_section: dict[str, Any],
 ) -> dict[str, Any]:
@@ -39,6 +41,7 @@ def advance_scenario_state(
         "chapter_no": chapter_no,
         "section_no": outline_section["section_no"],
     }
+    state["current_subsection"] = subsection_no
     updates = generated_section["state_updates"]
     character_ids = set(state["character_locations"])
 
@@ -75,6 +78,7 @@ def advance_scenario_state(
         event_record = {
             "chapter_no": chapter_no,
             "section_no": outline_section["section_no"],
+            "subsection_no": subsection_no,
             "event": event,
         }
         if event_record not in occurred_events:
@@ -104,6 +108,7 @@ def validate_scenario_state(
     required = {
         "state_version",
         "current_section",
+        "current_subsection",
         "character_locations",
         "possessions",
         "known_information",
@@ -141,6 +146,11 @@ def validate_scenario_state(
         state["current_section"], dict
     ):
         raise ValueError("Scenario current_section must be an object or null")
+    if state["current_subsection"] is not None and (
+        not isinstance(state["current_subsection"], int)
+        or state["current_subsection"] <= 0
+    ):
+        raise ValueError("Scenario current_subsection must be a positive integer or null")
     if state["recent_context"] is not None and not isinstance(
         state["recent_context"], str
     ):

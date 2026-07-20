@@ -21,7 +21,7 @@ flowchart TD
     INIT --> STATE
     INIT --> TARGET[次のサブセクションを選択]
 
-    STATE[(累積シナリオ状態 v2)] --> PROMPT[本文プロンプト構築]
+    STATE[(累積シナリオ状態 v3)] --> PROMPT[本文プロンプト構築]
     TARGET --> PROMPT
     PROMPT --> GENERATE[サブセクション本文と<br/>state_updatesを生成]
     GENERATE --> CHECK{スキーマ・整合性・<br/>品質検証}

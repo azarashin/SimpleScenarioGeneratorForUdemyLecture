@@ -168,24 +168,13 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
         previous_start = prompt.index(self.previous_state_marker) + len(
             self.previous_state_marker
         )
-        previous_state, _ = json.JSONDecoder().raw_decode(prompt[previous_start:])
-        previous_summary = previous_state.get("recent_context") or "The story begins here."
-        previous_events = " / ".join(
-            str(item.get("event", ""))
-            for item in previous_state.get("occurred_events", [])[-4:]
-            if isinstance(item, dict)
-        )
-        carryover = (
-            f" Previous events carried forward: {previous_events}."
-            if previous_events
-            else ""
-        )
+        _previous_state, _ = json.JSONDecoder().raw_decode(prompt[previous_start:])
         narration = (
-            f"Continuing from the established state ({previous_summary}), chapter "
+            "Beginning after the established state without replaying it, chapter "
             f"{chapter_no} section {section_no} advances this distinct purpose: {purpose}. "
-            f"The scene explicitly develops the required events: {events}.{carryover} "
+            f"The scene develops only the new required events: {events}. "
             "Characters observe the consequences, react according to their established "
-            "roles, and move the situation forward without skipping causal steps. "
+            "roles, and move the situation forward without replaying completed actions. "
         )
         dialogue = (
             f"We carry the previous situation forward and confront these events now: {events}."
