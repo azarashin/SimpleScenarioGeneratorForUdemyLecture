@@ -25,6 +25,16 @@ HTMLは `output/<run-id>/index.html` と `chapter-N/` 以下へUTF-8で原子的
 `SCENARIO_GENERATION_KNOWHOW.md` を参照してください。
 画像生成の設定、実行例、成果物、再開方法は `IMAGE_GENERATION.md` を参照してください。
 
+## キャラクター入力とStep 01
+
+`examples/input.json`の`character_overviews`には、最低限のID・名前・役割・概要に加え、
+年齢、立場、外見、服装、人物像、背景、成長軸、口調、セリフ例、人物間関係、表情ルールを
+指定できます。Step 01はこれらを`character_profiles`へ構造を保って変換します。
+
+画像生成は外見・服装・基本ポーズ・画像用補足を参照し、本文生成は性格、価値観、長所短所、
+背景、成長軸、口調、禁止表現、セリフ例、人物間関係を参照します。`emotion_range`は全16表情の
+画像生成範囲を削らず、本文中で優先的に使用する表情の範囲として扱います。
+
 ## 画像生成設定
 
 画像生成は `ImageGenerationProvider` を介して実行します。`mock` は外部APIを呼び出さず、

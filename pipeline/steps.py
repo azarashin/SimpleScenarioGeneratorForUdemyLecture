@@ -39,30 +39,77 @@ class GenerateCharacterProfilesStep(Step):
         input_data = context.shared_data["input"]
         profiles: list[dict[str, Any]] = []
         for item in input_data["character_overviews"]:
+            speech_profile = item.get("speech_profile", {})
             profiles.append(
                 {
                     "character_id": item["character_id"],
                     "name": item["name"],
                     "role": item["role"],
                     "personality": {
-                        "core_traits": ["thoughtful"],
-                        "values": ["integrity"],
-                        "weaknesses": ["hesitation"],
+                        "core_traits": item.get(
+                            "personality_traits", ["thoughtful"]
+                        ),
+                        "values": item.get("values", ["integrity"]),
+                        "strengths": item.get("strengths", []),
+                        "weaknesses": item.get("weaknesses", ["hesitation"]),
                     },
                     "speech": {
-                        "style": item.get("speech_style_hint", "natural"),
-                        "first_person": "I",
-                        "verbal_tics": [],
+                        "style": speech_profile.get(
+                            "style", item.get("speech_style_hint", "natural")
+                        ),
+                        "sentence_length": speech_profile.get(
+                            "sentence_length", "medium"
+                        ),
+                        "politeness_level": speech_profile.get(
+                            "politeness_level", "context-appropriate"
+                        ),
+                        "first_person": speech_profile.get("first_person", "I"),
+                        "second_person": speech_profile.get(
+                            "second_person", "name or role"
+                        ),
+                        "verbal_tics": speech_profile.get("common_phrases", []),
+                        "forbidden_phrases": speech_profile.get(
+                            "forbidden_phrases", []
+                        ),
+                        "sample_lines": speech_profile.get("sample_lines", []),
                     },
                     "appearance": {
                         "age_impression": item.get("age_range", "adult"),
+                        "gender": item.get("gender", "unknown"),
+                        "position": item.get("position", item["role"]),
                         "features": [item.get("appearance_hint", "distinctive")],
-                        "costume": "scene-appropriate clothing",
+                        "costume": item.get(
+                            "costume", "scene-appropriate clothing"
+                        ),
+                        "standing_pose": item.get(
+                            "standing_pose", "relaxed neutral standing pose"
+                        ),
+                        "image_prompt_hint": item.get(
+                            "image_prompt_hint", item.get("appearance_hint", "distinctive")
+                        ),
                     },
+                    "background": item.get("background_hint", item["summary"]),
+                    "narrative": {
+                        "conversation_role": item.get(
+                            "conversation_role", item["role"]
+                        ),
+                        "growth_arc": item.get(
+                            "growth_arc", "Develop through the central conflict"
+                        ),
+                        "relationship_to_protagonist": item.get(
+                            "relationship_to_protagonist", "not specified"
+                        ),
+                    },
+                    "relationships": item.get("relationships", []),
                     "emotion_model": {
                         "available_expressions": [
                             name for name, _ in EXPRESSION_CONCEPTS
                         ],
+                        "preferred_expressions": item.get(
+                            "emotion_range",
+                            [name for name, _ in EXPRESSION_CONCEPTS],
+                        ),
+                        "expression_rules": item.get("expression_rules", []),
                     },
                 }
             )
@@ -1296,7 +1343,10 @@ class GenerateDialogueTagsStep(Step):
                 profile = profiles[speaker_id]
                 expression, reason = self._infer_expression(
                     str(block["text"]),
-                    profile["emotion_model"]["available_expressions"],
+                    profile["emotion_model"].get(
+                        "preferred_expressions",
+                        profile["emotion_model"]["available_expressions"],
+                    ),
                 )
                 tags.append(
                     {

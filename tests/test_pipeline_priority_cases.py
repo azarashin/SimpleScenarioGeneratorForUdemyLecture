@@ -486,6 +486,59 @@ def test_consistency_checker_rejects_timeline_drift(make_context) -> None:
         )
 
 
+def test_character_profile_preserves_enriched_input(make_context) -> None:
+    context, _ = make_context()
+    overview = context.shared_data["input"]["character_overviews"][0]
+    overview.update(
+        {
+            "age_range": "18歳",
+            "gender": "female",
+            "position": "見習い司書",
+            "appearance_hint": "濃紺の髪と青灰色の瞳",
+            "costume": "紺色の司書ローブ",
+            "standing_pose": "記録帳を胸元で抱える",
+            "image_prompt_hint": "静かな好奇心が伝わる表情",
+            "background_hint": "失われた記憶を探している",
+            "personality_traits": ["慎重", "観察力が高い"],
+            "values": ["本人の意思"],
+            "strengths": ["矛盾の発見"],
+            "weaknesses": ["自分を疑いすぎる"],
+            "relationship_to_protagonist": "本人",
+            "conversation_role": "質問役",
+            "growth_arc": "自分で選択できるようになる",
+            "speech_profile": {
+                "style": "柔らかな口語",
+                "sentence_length": "短め",
+                "politeness_level": "基本は丁寧",
+                "first_person": "私",
+                "second_person": "名前呼び",
+                "common_phrases": ["少し待って"],
+                "forbidden_phrases": ["どうでもいい"],
+                "sample_lines": ["記録と合わない。"],
+            },
+            "relationships": [],
+            "expression_rules": [
+                {"condition": "考えを整理する", "expression": "thinking"}
+            ],
+        }
+    )
+
+    profile = GenerateCharacterProfilesStep().run(context).output[
+        "character_profiles"
+    ][0]
+
+    assert profile["personality"]["core_traits"] == ["慎重", "観察力が高い"]
+    assert profile["personality"]["strengths"] == ["矛盾の発見"]
+    assert profile["speech"]["first_person"] == "私"
+    assert profile["speech"]["sample_lines"] == ["記録と合わない。"]
+    assert profile["appearance"]["costume"] == "紺色の司書ローブ"
+    assert profile["background"] == "失われた記憶を探している"
+    assert profile["narrative"]["growth_arc"] == "自分で選択できるようになる"
+    assert profile["emotion_model"]["expression_rules"] == [
+        {"condition": "考えを整理する", "expression": "thinking"}
+    ]
+
+
 def test_consistency_checker_rejects_ambiguous_character_names(make_context) -> None:
     context, _ = make_context()
     context.shared_data["input"]["character_overviews"].append(

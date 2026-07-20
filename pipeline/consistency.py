@@ -298,6 +298,38 @@ class PipelineConsistencyChecker:
                     f"normalize to {normalized_name!r}"
                 )
             names_by_normalized[normalized_name] = character_id
+            relationships = profile.get("relationships", [])
+            unknown_relationship_ids = {
+                relationship["target_character_id"]
+                for relationship in relationships
+                if relationship["target_character_id"] not in profile_by_id
+            }
+            if unknown_relationship_ids:
+                self._fail(
+                    f"character {character_id} relationships reference unknown "
+                    f"characters: {sorted(unknown_relationship_ids)}"
+                )
+            available_expressions = set(
+                profile["emotion_model"]["available_expressions"]
+            )
+            unknown_preferred_expressions = set(
+                profile["emotion_model"].get("preferred_expressions", [])
+            ) - available_expressions
+            if unknown_preferred_expressions:
+                self._fail(
+                    f"character {character_id} prefers unavailable expressions: "
+                    f"{sorted(unknown_preferred_expressions)}"
+                )
+            unknown_rule_expressions = {
+                rule["expression"]
+                for rule in profile["emotion_model"].get("expression_rules", [])
+                if rule["expression"] not in available_expressions
+            }
+            if unknown_rule_expressions:
+                self._fail(
+                    f"character {character_id} expression rules reference unavailable "
+                    f"expressions: {sorted(unknown_rule_expressions)}"
+                )
 
     def _check_outline(self, data: dict[str, Any]) -> None:
         pipeline_input = self._pipeline_input(data)
