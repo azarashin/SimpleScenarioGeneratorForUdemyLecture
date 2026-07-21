@@ -46,6 +46,7 @@ def _section() -> dict[str, object]:
             ],
             "unresolved_plot_threads": ["who sealed the archive"],
             "resolved_plot_threads": ["who sent the letter"],
+            "completed_event_ids": ["phase-1-beat-1"],
             "continuity_summary": "They reached the sealed archive with a new map.",
         },
     }
@@ -63,7 +64,16 @@ def test_scenario_state_merges_durable_updates_into_compact_state() -> None:
     state = advance_scenario_state(
         initial,
         chapter_no=1,
-        outline_section={"section_no": 1, "key_events": ["library arrival"]},
+        subsection_no=1,
+        outline_section={
+            "section_no": 1,
+            "key_events": [
+                {
+                    "event_id": "phase-1-beat-1",
+                    "description": "They arrive at the library.",
+                }
+            ],
+        },
         generated_section=section,
     )
 
@@ -80,10 +90,15 @@ def test_scenario_state_merges_durable_updates_into_compact_state() -> None:
     ]
     assert state["unresolved_plot_threads"] == ["who sealed the archive"]
     assert state["introduced_entities"][0]["entity_id"] == "place-archive"
-    assert state["occurred_events"][-1]["event"] == "library arrival"
+    assert state["occurred_events"][-1]["event_id"] == "phase-1-beat-1"
     assert state["recent_context"] == (
         "They reached the sealed archive with a new map."
     )
+    assert state["current_subsection"] == 1
+    assert state["plan_progress"]["completed_event_ids"] == [
+        "phase-1-beat-1"
+    ]
+    assert state["plan_progress"]["last_planned_state_summary"] is None
 
 
 def test_scenario_state_rejects_updates_for_unknown_characters() -> None:
@@ -96,7 +111,16 @@ def test_scenario_state_rejects_updates_for_unknown_characters() -> None:
         advance_scenario_state(
             create_initial_scenario_state({"c001", "c002"}),
             chapter_no=1,
-            outline_section={"section_no": 1, "key_events": ["arrival"]},
+            subsection_no=1,
+            outline_section={
+                "section_no": 1,
+                "key_events": [
+                    {
+                        "event_id": "phase-1-beat-1",
+                        "description": "They arrive.",
+                    }
+                ],
+            },
             generated_section=section,
         )
 
@@ -124,7 +148,12 @@ def test_section_checkpoint_state_is_restored_and_passed_to_next_prompt(
     assert state["recent_context"] == payload["section"]["state_updates"][
         "continuity_summary"
     ]
-    assert len(state["occurred_events"]) == 3
+    assert state["current_subsection"] == 1
+    assert len(state["occurred_events"]) == 1
+    assert state["plan_progress"]["completed_event_ids"] == [
+        "phase-1-beat-1"
+    ]
+    assert state["plan_progress"]["last_planned_state_summary"]
     assert "character_locations" in provider.requests[1].prompt
     assert payload["section"]["narrative_blocks"][0]["text"] not in (
         provider.requests[1].prompt

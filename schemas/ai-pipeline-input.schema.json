@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Generated Pipeline Input",
+  "type": "object",
+  "required": ["scenario_idea", "character_overviews"],
+  "additionalProperties": false,
+  "properties": {
+    "scenario_idea": {
+      "type": "object",
+      "required": [
+        "title", "genre", "theme", "premise", "tone", "must_include",
+        "must_avoid", "audience", "target_length"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "$ref": "#/$defs/nonEmptyString" },
+        "genre": { "$ref": "#/$defs/nonEmptyString" },
+        "theme": { "$ref": "#/$defs/nonEmptyString" },
+        "premise": { "$ref": "#/$defs/nonEmptyString" },
+        "tone": { "$ref": "#/$defs/nonEmptyString" },
+        "must_include": { "$ref": "#/$defs/stringArray" },
+        "must_avoid": { "$ref": "#/$defs/stringArray" },
+        "audience": { "$ref": "#/$defs/nonEmptyString" },
+        "target_length": {
+          "type": "object",
+          "required": ["chapter_count", "sections_per_chapter"],
+          "additionalProperties": false,
+          "properties": {
+            "chapter_count": { "type": "integer", "minimum": 1 },
+            "sections_per_chapter": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "character_overviews": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/characterOverview" }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "stringArray": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "characterOverview": {
+      "type": "object",
+      "required": [
+        "character_id", "name", "role", "summary", "age_range", "gender",
+        "position", "speech_style_hint", "appearance_hint", "costume",
+        "standing_pose", "image_prompt_hint", "background_hint",
+        "personality_traits", "values", "strengths", "weaknesses",
+        "relationship_to_protagonist", "conversation_role", "growth_arc",
+        "speech_profile", "relationship_hints", "relationships",
+        "emotion_range", "expression_rules"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "character_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "role": { "$ref": "#/$defs/nonEmptyString" },
+        "summary": { "$ref": "#/$defs/nonEmptyString" },
+        "age_range": { "$ref": "#/$defs/nonEmptyString" },
+        "gender": {
+          "type": "string",
+          "enum": ["unknown", "male", "female", "other"]
+        },
+        "position": { "$ref": "#/$defs/nonEmptyString" },
+        "speech_style_hint": { "$ref": "#/$defs/nonEmptyString" },
+        "appearance_hint": { "$ref": "#/$defs/nonEmptyString" },
+        "costume": { "$ref": "#/$defs/nonEmptyString" },
+        "standing_pose": { "$ref": "#/$defs/nonEmptyString" },
+        "image_prompt_hint": { "$ref": "#/$defs/nonEmptyString" },
+        "background_hint": { "$ref": "#/$defs/nonEmptyString" },
+        "personality_traits": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "strengths": { "$ref": "#/$defs/stringArray" },
+        "weaknesses": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "relationship_to_protagonist": { "$ref": "#/$defs/nonEmptyString" },
+        "conversation_role": { "$ref": "#/$defs/nonEmptyString" },
+        "growth_arc": { "$ref": "#/$defs/nonEmptyString" },
+        "speech_profile": { "$ref": "#/$defs/speechProfile" },
+        "relationship_hints": { "$ref": "#/$defs/stringArray" },
+        "relationships": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relationship" }
+        },
+        "emotion_range": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/expression" }
+        },
+        "expression_rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/expressionRule" }
+        }
+      }
+    },
+    "speechProfile": {
+      "type": "object",
+      "required": [
+        "style", "sentence_length", "politeness_level", "first_person",
+        "second_person", "common_phrases", "forbidden_phrases", "sample_lines"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "style": { "$ref": "#/$defs/nonEmptyString" },
+        "sentence_length": { "$ref": "#/$defs/nonEmptyString" },
+        "politeness_level": { "$ref": "#/$defs/nonEmptyString" },
+        "first_person": { "$ref": "#/$defs/nonEmptyString" },
+        "second_person": { "$ref": "#/$defs/nonEmptyString" },
+        "common_phrases": { "$ref": "#/$defs/stringArray" },
+        "forbidden_phrases": { "$ref": "#/$defs/stringArray" },
+        "sample_lines": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": [
+        "target_character_id", "relationship", "attitude", "addressing_style"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "target_character_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "relationship": { "$ref": "#/$defs/nonEmptyString" },
+        "attitude": { "$ref": "#/$defs/nonEmptyString" },
+        "addressing_style": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "expression": {
+      "type": "string",
+      "enum": [
+        "neutral", "smile", "serious", "thinking", "surprised", "worried",
+        "confused", "angry", "sad", "relieved", "embarrassed", "nervous",
+        "confident", "doubtful", "shocked", "determined"
+      ]
+    },
+    "expressionRule": {
+      "type": "object",
+      "required": ["condition", "expression"],
+      "additionalProperties": false,
+      "properties": {
+        "condition": { "$ref": "#/$defs/nonEmptyString" },
+        "expression": { "$ref": "#/$defs/expression" }
+      }
+    }
+  }
+}

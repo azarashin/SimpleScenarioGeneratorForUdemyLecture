@@ -14,13 +14,99 @@
       "character_id": "c001",
       "name": "アオイ",
       "role": "主人公",
-      "summary": "新米の見習い司書。観察力が高いが、自信が持てない。"
+      "summary": "時空図書館に配属された新米の見習い司書。失われた記憶の痕跡を読む感覚に優れるが、自分の判断に確信を持てない。",
+      "age_range": "18歳前後",
+      "gender": "female",
+      "position": "時空図書館の見習い司書",
+      "appearance_hint": "肩までの濃紺の髪、青灰色の瞳、古い鍵を模した髪留め。華奢だが姿勢はまっすぐ。",
+      "costume": "白いブラウスの上に紺色の司書用ローブを羽織り、腰に記録札と小さな鍵束を下げている。",
+      "standing_pose": "胸元で記録帳を抱え、少し緊張しながらも相手を正面から見る。",
+      "image_prompt_hint": "知的で親しみやすい若い女性。静かな好奇心とためらいが同居する表情。髪留めと司書ローブを全画像で維持する。",
+      "background_hint": "幼い頃の一部の記憶を失っており、その記録が時空図書館に保管されている可能性を知らずに司書を志した。",
+      "personality_traits": ["観察力が高い", "慎重", "他者の痛みに敏感", "責任感が強い"],
+      "values": ["記憶の持ち主の意思", "事実を確かめてから選ぶこと", "仲間との信頼"],
+      "strengths": ["小さな矛盾に気づく", "相手の話を最後まで聞く", "危機でも記録を残す"],
+      "weaknesses": ["自分の直感を疑いすぎる", "失敗を一人で抱え込む", "自分の過去に関わると視野が狭くなる"],
+      "relationship_to_protagonist": "本人",
+      "conversation_role": "質問と観察を通して情報を引き出し、読者とともに真相へ近づく役",
+      "growth_arc": "正解を他人に求める見習いから、不完全な情報の中でも自分の価値観で選択し、その結果を引き受ける司書へ成長する。",
+      "speech_profile": {
+        "style": "柔らかく自然な口語。考えながら話すときは一度言葉を区切る。重要な場面では短く明確に言い切る。",
+        "sentence_length": "普段は短めから普通。推理を整理するときだけ少し長くなる。",
+        "politeness_level": "基本は丁寧だが、レイには親しみのあるくだけた話し方も混じる。",
+        "first_person": "私",
+        "second_person": "名前呼び。初対面や目上にはあなた、または役職名。",
+        "common_phrases": ["少し待って", "記録と合わない", "ちゃんと確かめたい"],
+        "forbidden_phrases": ["どうでもいい", "絶対に間違いない"],
+        "sample_lines": [
+          "少し待って。この頁だけ、記憶の綴じ方が違う。",
+          "怖いけど、知らないまま誰かに決めてもらうのは嫌。",
+          "レイ、私の考えを聞いてくれる？"
+        ]
+      },
+      "relationships": [
+        {
+          "target_character_id": "c002",
+          "relationship": "先輩に近い相棒",
+          "attitude": "実務能力を信頼しているが、自分を子ども扱いされると反発する。",
+          "addressing_style": "レイ"
+        }
+      ],
+      "emotion_range": ["neutral", "smile", "serious", "thinking", "surprised", "worried", "confused", "angry", "sad", "relieved", "embarrassed", "nervous", "confident", "doubtful", "shocked", "determined"],
+      "expression_rules": [
+        {"condition": "記録の矛盾を検討している", "expression": "thinking"},
+        {"condition": "自分の記憶に関する手掛かりを突きつけられる", "expression": "shocked"},
+        {"condition": "迷いながらも自分で選択する", "expression": "determined"}
+      ]
     },
     {
       "character_id": "c002",
       "name": "レイ",
       "role": "相棒",
-      "summary": "図書館の巡回係。冷静で実務的。"
+      "summary": "時空図書館の巡回係。冷静で実務的だが、禁書事件とアオイの過去について何かを隠している。",
+      "age_range": "22歳前後",
+      "gender": "male",
+      "position": "時空図書館の上級巡回係",
+      "appearance_hint": "短い銀灰色の髪、琥珀色の瞳、細身で長身。左手に封印術の痕がある。",
+      "costume": "黒に近い灰色の巡回係コート。肩章と銀色の留め具、腰に封印用の革手袋を備える。",
+      "standing_pose": "片手をコートのポケットに入れ、周囲を警戒しながら半歩前に立つ。",
+      "image_prompt_hint": "落ち着いた若い男性。感情を抑えた鋭い視線と、わずかな疲労感。左手の封印痕と巡回係コートを維持する。",
+      "background_hint": "過去の禁書事故で同僚を失い、規則違反による被害を恐れている。アオイの失われた記憶に関する封印作業へ関与していた。",
+      "personality_traits": ["冷静", "実務的", "警戒心が強い", "面倒見がよい"],
+      "values": ["生存者を守ること", "危険な知識の管理", "約束を守ること"],
+      "strengths": ["危険の予測", "即断即決", "封印術と館内構造への知識"],
+      "weaknesses": ["情報を抱え込む", "保護を理由に他人の選択を狭める", "過去の失敗を指摘されると頑なになる"],
+      "relationship_to_protagonist": "アオイの教育担当を兼ねる相棒。過去への負い目から過保護になっている。",
+      "conversation_role": "状況説明と現実的な反論を担い、ときに情報を伏せて緊張を生む役",
+      "growth_arc": "守るために情報を隠す人物から、アオイを対等な選択者として信頼し、真実と責任を共有する人物へ変化する。",
+      "speech_profile": {
+        "style": "簡潔で落ち着いた口語。危険を説明するときは具体的で、感情を隠すときほど事務的になる。",
+        "sentence_length": "短め。説明が必要な場合も要点を区切って話す。",
+        "politeness_level": "同僚には常体。上役には簡潔な敬語。アオイにはぶっきらぼうだが威圧的にはしない。",
+        "first_person": "俺",
+        "second_person": "名前呼び。敵対者にはあんた。",
+        "common_phrases": ["順番に確認するぞ", "今は触るな", "可能性の話だ"],
+        "forbidden_phrases": ["俺に任せて黙っていろ", "お前には無理だ"],
+        "sample_lines": [
+          "アオイ、推測と記録を分けろ。まず分かっていることからだ。",
+          "隠したかったわけじゃない。知れば、君が選ばされると思った。",
+          "今度は俺が決めない。どうするかは、一緒に考える。"
+        ]
+      },
+      "relationships": [
+        {
+          "target_character_id": "c001",
+          "relationship": "教育対象であり相棒",
+          "attitude": "能力を認めている一方、過去への負い目から危険を遠ざけようとする。",
+          "addressing_style": "アオイ"
+        }
+      ],
+      "emotion_range": ["neutral", "smile", "serious", "thinking", "surprised", "worried", "confused", "angry", "sad", "relieved", "embarrassed", "nervous", "confident", "doubtful", "shocked", "determined"],
+      "expression_rules": [
+        {"condition": "危険や規則違反を警告する", "expression": "serious"},
+        {"condition": "アオイの過去について追及される", "expression": "doubtful"},
+        {"condition": "アオイを対等な相棒として認める", "expression": "relieved"}
+      ]
     }
   ]
 }

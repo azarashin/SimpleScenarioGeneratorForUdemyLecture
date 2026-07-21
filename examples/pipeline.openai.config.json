@@ -1,18 +1,30 @@
 {
     "text_generation": {
         "provider": "openai",
-        "model": "gpt-5.3-codex",
+        "model": "gpt-5.6-luna",
         "timeout_seconds": 120,
         "api_key_env": "OPENAI_API_KEY"
+    },
+    "character_profile_generation": {
+        "enabled": true,
+        "require_review": true
+    },
+    "planning_input_generation": {
+        "enabled": true,
+        "require_review": true
     },
     "scenario_body_generation": {
         "subsections_per_section": 3,
         "target_characters": 1200,
-        "min_characters": 1000,
+        "min_characters": 850,
         "max_characters": 1600,
         "min_dialogue_blocks": 6,
         "max_dialogue_blocks": 14,
         "require_event_mentions": true
+    },
+    "scenario_review": {
+        "enabled": true,
+        "require_human_review": false
     },
     "temperature_policy": {
         "low_temperature": 0.2,

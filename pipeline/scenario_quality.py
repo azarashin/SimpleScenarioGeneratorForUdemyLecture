@@ -56,13 +56,35 @@ class ScenarioBodyQualityChecker:
 
         if require_event_mentions:
             normalized_text = unicodedata.normalize("NFKC", combined_text).casefold()
-            missing_events = [
-                event
-                for event in outline_section["key_events"]
-                if unicodedata.normalize("NFKC", event).casefold() not in normalized_text
-            ]
-            if missing_events:
-                self._fail(f"{location} does not cover required events: {missing_events}")
+            required_event_ids = {
+                event["event_id"] for event in outline_section["key_events"]
+            }
+            completed_event_ids = set(
+                generated_section["state_updates"]["completed_event_ids"]
+            )
+            missing_event_ids = required_event_ids - completed_event_ids
+            if missing_event_ids:
+                self._fail(
+                    f"{location} does not complete required event IDs: "
+                    f"{sorted(missing_event_ids)}"
+                )
+            unexpected_event_ids = completed_event_ids - required_event_ids
+            if unexpected_event_ids:
+                self._fail(
+                    f"{location} reports unexpected completed event IDs: "
+                    f"{sorted(unexpected_event_ids)}"
+                )
+            leaked_event_ids = {
+                event_id
+                for event_id in required_event_ids
+                if unicodedata.normalize("NFKC", event_id).casefold()
+                in normalized_text
+            }
+            if leaked_event_ids:
+                self._fail(
+                    f"{location} exposes internal event IDs in narrative text: "
+                    f"{sorted(leaked_event_ids)}"
+                )
 
     @staticmethod
     def _fail(reason: str) -> None:

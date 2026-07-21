@@ -40,7 +40,7 @@ class ScenarioSectionPromptBuilder:
         subsection: dict[str, Any],
         previous_state: dict[str, Any],
         target_characters: int = 1200,
-        min_characters: int = 1000,
+        min_characters: int = 850,
         max_characters: int = 1600,
         min_dialogue_blocks: int = 6,
         max_dialogue_blocks: int = 14,
@@ -48,16 +48,20 @@ class ScenarioSectionPromptBuilder:
     ) -> RenderedSectionPrompt:
         definition = self.catalog.resolve(self.step_name, version)
         allowed_ids = list(section["participating_characters"])
-        known_ids = {profile["character_id"] for profile in character_profiles}
+        profiles_by_id = {
+            profile["character_id"]: profile for profile in character_profiles
+        }
+        known_ids = set(profiles_by_id)
         unknown_ids = set(allowed_ids) - known_ids
         if unknown_ids:
             raise ValueError(
                 f"Cannot build section prompt with unknown character IDs: {sorted(unknown_ids)}"
             )
+        participating_profiles = [profiles_by_id[item] for item in allowed_ids]
 
         variables = {
             "scenario_idea_json": self._json(scenario_idea),
-            "character_profiles_json": self._json(character_profiles),
+            "character_profiles_json": self._json(participating_profiles),
             "chapter_json": self._json(
                 {
                     "chapter_no": chapter["chapter_no"],
@@ -99,6 +103,36 @@ class ScenarioSectionPromptBuilder:
             "for existing thread strings resolved here; and continuity_summary for a "
             "concise account of the resulting situation needed by the next section. Use "
             "empty arrays or objects when there are no updates.",
+        )
+        template_text += (
+            "\n- Treat PREVIOUS SECTION STATE OR SUMMARY as completed history. Start "
+            "after recent_context, never recreate its opening, preparation, discovery, "
+            "conversation, or decision.\n"
+            "- TARGET SUBSECTION.start_state is already true before the first block. "
+            "Do not dramatize it again.\n"
+            "- Complete TARGET SUBSECTION.state_change during this output and finish in "
+            "TARGET SUBSECTION.end_state. A recap or another preparation step is not a "
+            "valid state change.\n"
+            "- Obey every TARGET SUBSECTION.must_not_repeat item. Treat every event in "
+            "PREVIOUS SECTION STATE OR SUMMARY.occurred_events as completed and never "
+            "stage it again.\n"
+            "- Use at most one brief transition sentence to connect from recent_context; "
+            "spend the remaining text on new action, information, choice, or consequence."
+            "\n- TARGET SUBSECTION.planned_state_updates is a binding prose contract. "
+            "Make every listed location, possession, fact, relationship change, entity, "
+            "thread transition, clue transition, and character-arc change observably true "
+            "by the end. Reflect durable results in state_updates; do not merely mention "
+            "the planning labels."
+            "\n- PREVIOUS SECTION STATE OR SUMMARY.plan_progress records already executed "
+            "outline commitments. Never re-plant a planted clue, reopen a completed event, "
+            "or repeat a character turning point."
+            "\n- character_locations and possessions may use only character IDs listed "
+            "in CHARACTER PROFILES. Track incidental or dynamically introduced NPCs in "
+            "introduced_entities and continuity_summary instead; never create a new "
+            "canonical character ID in character state updates."
+            "\n- Copy chapter_no, section_no, and section_title exactly from TARGET CHAPTER "
+            "and TARGET SECTION. These are immutable identifiers; never translate, shorten, "
+            "or paraphrase the section title."
         )
         try:
             text = Template(template_text).substitute(variables)

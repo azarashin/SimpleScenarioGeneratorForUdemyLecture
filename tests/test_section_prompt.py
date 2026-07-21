@@ -41,7 +41,9 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
     assert context.shared_data["input"]["scenario_idea"]["theme"] in prompt.text
     assert context.shared_data["input"]["scenario_idea"]["premise"] in prompt.text
     assert section["section_purpose"] in prompt.text
-    assert all(event in prompt.text for event in section["key_events"])
+    assert all(
+        event["description"] in prompt.text for event in section["key_events"]
+    )
     assert section["participating_characters"][0] in prompt.text
     assert "the key is missing" in prompt.text
     assert "scenario-sections.schema.json" in prompt.text
@@ -51,8 +53,13 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
     assert "TARGET SUBSECTION" in prompt.text
     assert "Populate state_updates with every durable fact" in prompt.text
     assert "compact cumulative state is authoritative" in prompt.text
+    assert "Start after recent_context" in prompt.text
+    assert "never recreate its opening" in prompt.text
+    assert "must_not_repeat" in prompt.text
+    assert "planned_state_updates is a binding prose contract" in prompt.text
+    assert "plan_progress records already executed" in prompt.text
     assert "Aim for approximately 1200 non-whitespace characters" in prompt.text
-    assert "Accepted length is 1000 to 1600 non-whitespace characters" in prompt.text
+    assert "Accepted length is 850 to 1600 non-whitespace characters" in prompt.text
     assert '"maxItems": 1' in prompt.text
     assert '{"scenario_sections": [one target section]}' in prompt.text
 
@@ -71,8 +78,44 @@ def test_section_prompt_rejects_unknown_participating_character(make_context) ->
                 "subsection_no": 1,
                 "subsection_title": "Beat",
                 "subsection_purpose": "Test",
-                "key_events": ["event"],
+                "key_events": [
+                    {
+                        "event_id": "phase-1-beat-1",
+                        "description": "A new event occurs.",
+                    }
+                ],
+                "start_state": "The previous scene is complete.",
+                "state_change": {
+                    "event_id": "phase-1-beat-1",
+                    "description": "A new event occurs.",
+                },
+                "end_state": "The event is complete.",
+                "must_not_repeat": ["Do not replay the previous scene."],
             },
             previous_state={},
             version="v2",
         )
+
+
+def test_section_prompt_excludes_non_participating_character_profiles(make_context) -> None:
+    context, chapter, section = _prepared_context(make_context)
+    profiles = [
+        *context.shared_data["character_profiles"],
+        {
+            "character_id": "c999",
+            "name": "OFFSTAGE-PROFILE-MARKER",
+            "role": "later character",
+        },
+    ]
+
+    prompt = ScenarioSectionPromptBuilder().build(
+        scenario_idea=context.shared_data["input"]["scenario_idea"],
+        character_profiles=profiles,
+        chapter=chapter,
+        section=section,
+        subsection=section["subsections"][0],
+        previous_state={},
+        version="v2",
+    )
+
+    assert "OFFSTAGE-PROFILE-MARKER" not in prompt.text

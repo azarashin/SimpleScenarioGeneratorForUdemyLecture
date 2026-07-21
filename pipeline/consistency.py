@@ -12,6 +12,26 @@ from .errors import ConsistencyCheckError
 from .scenario_quality import ScenarioBodyQualityChecker
 
 
+CANONICAL_EXPRESSIONS = (
+    "neutral",
+    "smile",
+    "serious",
+    "thinking",
+    "surprised",
+    "worried",
+    "confused",
+    "angry",
+    "sad",
+    "relieved",
+    "embarrassed",
+    "nervous",
+    "confident",
+    "doubtful",
+    "shocked",
+    "determined",
+)
+
+
 class PipelineConsistencyChecker:
     def __init__(self) -> None:
         self.scenario_quality_checker = ScenarioBodyQualityChecker()
@@ -298,6 +318,52 @@ class PipelineConsistencyChecker:
                     f"normalize to {normalized_name!r}"
                 )
             names_by_normalized[normalized_name] = character_id
+            relationships = profile.get("relationships", [])
+            unknown_relationship_ids = {
+                relationship["target_character_id"]
+                for relationship in relationships
+                if relationship["target_character_id"] not in profile_by_id
+            }
+            if unknown_relationship_ids:
+                self._fail(
+                    f"character {character_id} relationships reference unknown "
+                    f"characters: {sorted(unknown_relationship_ids)}"
+                )
+            available_expressions = set(
+                profile["emotion_model"]["available_expressions"]
+            )
+            if profile["emotion_model"]["available_expressions"] != list(
+                CANONICAL_EXPRESSIONS
+            ):
+                self._fail(
+                    f"character {character_id} available expressions must equal "
+                    "the canonical expression list in canonical order"
+                )
+            unknown_preferred_expressions = set(
+                profile["emotion_model"].get("preferred_expressions", [])
+            ) - available_expressions
+            if unknown_preferred_expressions:
+                self._fail(
+                    f"character {character_id} prefers unavailable expressions: "
+                    f"{sorted(unknown_preferred_expressions)}"
+                )
+            preferred_expressions = profile["emotion_model"].get(
+                "preferred_expressions", []
+            )
+            if preferred_expressions and "neutral" not in preferred_expressions:
+                self._fail(
+                    f"character {character_id} preferred expressions must include neutral"
+                )
+            unknown_rule_expressions = {
+                rule["expression"]
+                for rule in profile["emotion_model"].get("expression_rules", [])
+                if rule["expression"] not in available_expressions
+            }
+            if unknown_rule_expressions:
+                self._fail(
+                    f"character {character_id} expression rules reference unavailable "
+                    f"expressions: {sorted(unknown_rule_expressions)}"
+                )
 
     def _check_outline(self, data: dict[str, Any]) -> None:
         pipeline_input = self._pipeline_input(data)
@@ -316,6 +382,8 @@ class PipelineConsistencyChecker:
             "chapter timeline",
         )
         valid_characters = self._character_ids(data)
+        self._check_outline_story_plan(outline, valid_characters)
+        first_section_participants: set[str] | None = None
         for chapter in chapters:
             sections = chapter["sections"]
             self._require_sequence(
@@ -324,11 +392,27 @@ class PipelineConsistencyChecker:
                 f"chapter {chapter['chapter_no']} section timeline",
             )
             for section in sections:
+                participant_list = section["participating_characters"]
+                if len(participant_list) != len(set(participant_list)):
+                    self._fail(
+                        f"chapter {chapter['chapter_no']} section "
+                        f"{section['section_no']} contains duplicate participating characters"
+                    )
+                if first_section_participants is None:
+                    first_section_participants = set(participant_list)
                 unknown = set(section["participating_characters"]) - valid_characters
                 if unknown:
                     self._fail(
                         f"chapter {chapter['chapter_no']} section {section['section_no']} "
                         f"references unknown characters: {sorted(unknown)}"
+                    )
+                section_event_ids = [
+                    event["event_id"] for event in section["key_events"]
+                ]
+                if len(section_event_ids) != len(set(section_event_ids)):
+                    self._fail(
+                        f"chapter {chapter['chapter_no']} section "
+                        f"{section['section_no']} contains repeated key events"
                     )
                 subsections = section.get("subsections", [])
                 if subsections:
@@ -340,16 +424,191 @@ class PipelineConsistencyChecker:
                             f"{section['section_no']} subsection timeline"
                         ),
                     )
-                    subsection_events = {
-                        event for item in subsections for event in item["key_events"]
-                    }
-                    missing_events = set(section["key_events"]) - subsection_events
-                    if missing_events:
+                    all_subsection_event_ids = [
+                        event["event_id"]
+                        for item in subsections
+                        for event in item["key_events"]
+                    ]
+                    if len(all_subsection_event_ids) != len(
+                        set(all_subsection_event_ids)
+                    ):
                         self._fail(
                             f"chapter {chapter['chapter_no']} section "
-                            f"{section['section_no']} subsections are missing events: "
-                            f"{sorted(missing_events)}"
+                            f"{section['section_no']} recycles events across subsections"
                         )
+                    if set(all_subsection_event_ids) != set(section_event_ids):
+                        self._fail(
+                            f"chapter {chapter['chapter_no']} section "
+                            f"{section['section_no']} subsection events differ from "
+                            "section events"
+                        )
+                    for subsection in subsections:
+                        if subsection["state_change"] not in subsection["key_events"]:
+                            self._fail(
+                                f"chapter {chapter['chapter_no']} section "
+                                f"{section['section_no']} subsection "
+                                f"{subsection['subsection_no']} state_change must be one "
+                                "of its key events"
+                            )
+        if (
+            len(valid_characters) >= 5
+            and first_section_participants == valid_characters
+        ):
+            self._fail(
+                "the first section must not introduce the entire cast when five or more "
+                "characters exist"
+            )
+
+    def _check_outline_story_plan(
+        self, outline: dict[str, Any], valid_characters: set[str]
+    ) -> None:
+        """Validate planned state transitions before prose generation begins."""
+        event_order = {
+            event["event_id"]: index
+            for index, event in enumerate(
+                event
+                for chapter in outline["chapters"]
+                for section in chapter["sections"]
+                for event in section["key_events"]
+            )
+        }
+        plan = outline["story_plan"]
+        threads = self._unique_items_by_key(
+            plan["plot_threads"], "story_plan.plot_threads", "thread_id"
+        )
+        clues = self._unique_items_by_key(
+            plan["foreshadowing"], "story_plan.foreshadowing", "clue_id"
+        )
+
+        for thread_id, thread in threads.items():
+            opened = thread["open_event_id"]
+            resolved = thread["resolve_event_id"]
+            if opened not in event_order:
+                self._fail(f"plot thread {thread_id} opens at unknown event {opened}")
+            if resolved is not None:
+                if resolved not in event_order:
+                    self._fail(f"plot thread {thread_id} resolves at unknown event {resolved}")
+                if event_order[resolved] <= event_order[opened]:
+                    self._fail(f"plot thread {thread_id} must resolve after it opens")
+
+        for clue_id, clue in clues.items():
+            planted = clue["plant_event_id"]
+            payoff = clue["payoff_event_id"]
+            if planted not in event_order or payoff not in event_order:
+                self._fail(f"foreshadow {clue_id} references an unknown event")
+            if event_order[payoff] <= event_order[planted]:
+                self._fail(f"foreshadow {clue_id} must pay off after it is planted")
+
+        arc_characters: set[str] = set()
+        for arc in plan["character_arcs"]:
+            character_id = arc["character_id"]
+            if character_id not in valid_characters:
+                self._fail(f"character arc references unknown character {character_id}")
+            if character_id in arc_characters:
+                self._fail(f"duplicate character arc for {character_id}")
+            arc_characters.add(character_id)
+            unknown_events = set(arc["turning_event_ids"]) - set(event_order)
+            if unknown_events:
+                self._fail(
+                    f"character arc for {character_id} references unknown events: "
+                    f"{sorted(unknown_events)}"
+                )
+
+        opened_threads: set[str] = set()
+        planted_clues: set[str] = set()
+        updates_by_event: dict[str, dict[str, Any]] = {}
+        for chapter in outline["chapters"]:
+            for section in chapter["sections"]:
+                for subsection in section.get("subsections", []):
+                    updates = subsection["planned_state_updates"]
+                    for event in subsection["key_events"]:
+                        updates_by_event[event["event_id"]] = updates
+                    unknown_thread_ids = (
+                        set(updates["opened_thread_ids"])
+                        | set(updates["resolved_thread_ids"])
+                    ) - set(threads)
+                    if unknown_thread_ids:
+                        self._fail(
+                            "planned state updates reference unknown plot threads: "
+                            f"{sorted(unknown_thread_ids)}"
+                        )
+                    unknown_clue_ids = (
+                        set(updates["planted_clue_ids"])
+                        | set(updates["paid_off_clue_ids"])
+                    ) - set(clues)
+                    if unknown_clue_ids:
+                        self._fail(
+                            "planned state updates reference unknown foreshadowing: "
+                            f"{sorted(unknown_clue_ids)}"
+                        )
+                    unknown_arc_characters = {
+                        item["character_id"]
+                        for item in updates["character_arc_changes"]
+                    } - valid_characters
+                    if unknown_arc_characters:
+                        self._fail(
+                            "planned character arc changes reference unknown characters: "
+                            f"{sorted(unknown_arc_characters)}"
+                        )
+                    premature_threads = set(updates["resolved_thread_ids"]) - opened_threads
+                    if premature_threads:
+                        self._fail(
+                            "planned plot threads resolve before opening: "
+                            f"{sorted(premature_threads)}"
+                        )
+                    premature_clues = set(updates["paid_off_clue_ids"]) - planted_clues
+                    if premature_clues:
+                        self._fail(
+                            "planned clues pay off before planting: "
+                            f"{sorted(premature_clues)}"
+                        )
+                    opened_threads.update(updates["opened_thread_ids"])
+                    opened_threads.difference_update(updates["resolved_thread_ids"])
+                    planted_clues.update(updates["planted_clue_ids"])
+
+        for thread_id, thread in threads.items():
+            open_updates = updates_by_event.get(thread["open_event_id"])
+            if open_updates is None or thread_id not in open_updates[
+                "opened_thread_ids"
+            ]:
+                self._fail(
+                    f"plot thread {thread_id} is not opened in its declared event"
+                )
+            resolved = thread["resolve_event_id"]
+            resolve_updates = updates_by_event.get(resolved) if resolved else None
+            if resolved is not None and (
+                resolve_updates is None
+                or thread_id not in resolve_updates["resolved_thread_ids"]
+            ):
+                self._fail(
+                    f"plot thread {thread_id} is not resolved in its declared event"
+                )
+        for clue_id, clue in clues.items():
+            plant_updates = updates_by_event.get(clue["plant_event_id"])
+            payoff_updates = updates_by_event.get(clue["payoff_event_id"])
+            if plant_updates is None or clue_id not in plant_updates[
+                "planted_clue_ids"
+            ]:
+                self._fail(
+                    f"foreshadow {clue_id} is not planted in its declared event"
+                )
+            if payoff_updates is None or clue_id not in payoff_updates[
+                "paid_off_clue_ids"
+            ]:
+                self._fail(
+                    f"foreshadow {clue_id} is not paid off in its declared event"
+                )
+        for arc in plan["character_arcs"]:
+            for event_id in arc["turning_event_ids"]:
+                turning_updates = updates_by_event.get(event_id)
+                if turning_updates is None or arc["character_id"] not in {
+                    item["character_id"]
+                    for item in turning_updates["character_arc_changes"]
+                }:
+                    self._fail(
+                        f"character arc for {arc['character_id']} has no planned "
+                        f"change at turning event {event_id}"
+                    )
 
     def _check_sections(self, data: dict[str, Any]) -> None:
         outline_by_location = {
@@ -458,6 +717,20 @@ class PipelineConsistencyChecker:
                     f"{character_id!r} in {source}"
                 )
             result[character_id] = item
+        return result
+
+    @staticmethod
+    def _unique_items_by_key(
+        items: list[dict[str, Any]], source: str, key: str
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for item in items:
+            item_id = item[key]
+            if item_id in result:
+                raise ConsistencyCheckError(
+                    f"Consistency check failed: duplicate {key} {item_id!r} in {source}"
+                )
+            result[item_id] = item
         return result
 
     @staticmethod

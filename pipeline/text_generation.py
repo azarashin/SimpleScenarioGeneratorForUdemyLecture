@@ -83,6 +83,8 @@ class TextGenerationProvider(ABC):
         prompt: str,
         model: str,
         temperature: float,
+        response_schema: dict[str, Any] | None = None,
+        response_name: str = "generated_response",
     ) -> GenerationResponse:
         """Generate and return a parsed JSON object."""
         raise NotImplementedError
@@ -104,6 +106,8 @@ class MockTextGenerationProvider(TextGenerationProvider):
         prompt: str,
         model: str,
         temperature: float,
+        response_schema: dict[str, Any] | None = None,
+        response_name: str = "generated_response",
     ) -> GenerationResponse:
         self.requests.append(GenerationRequest(prompt, model, temperature))
         if not self._responses:
@@ -138,6 +142,8 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
         prompt: str,
         model: str,
         temperature: float,
+        response_schema: dict[str, Any] | None = None,
+        response_name: str = "generated_response",
     ) -> GenerationResponse:
         self.requests.append(GenerationRequest(prompt, model, temperature))
         marker_index = prompt.find(self.target_marker)
@@ -156,30 +162,24 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
             chapter, _ = json.JSONDecoder().raw_decode(prompt[chapter_start:])
             chapter_no = chapter["chapter_no"]
         section_no = section["section_no"]
-        events = " / ".join(subsection["key_events"])
+        events = " / ".join(
+            event["description"] for event in subsection["key_events"]
+        )
+        completed_event_ids = [
+            event["event_id"] for event in subsection["key_events"]
+        ]
         purpose = subsection["subsection_purpose"]
         subsection_no = subsection["subsection_no"]
         previous_start = prompt.index(self.previous_state_marker) + len(
             self.previous_state_marker
         )
-        previous_state, _ = json.JSONDecoder().raw_decode(prompt[previous_start:])
-        previous_summary = previous_state.get("recent_context") or "The story begins here."
-        previous_events = " / ".join(
-            str(item.get("event", ""))
-            for item in previous_state.get("occurred_events", [])[-4:]
-            if isinstance(item, dict)
-        )
-        carryover = (
-            f" Previous events carried forward: {previous_events}."
-            if previous_events
-            else ""
-        )
+        _previous_state, _ = json.JSONDecoder().raw_decode(prompt[previous_start:])
         narration = (
-            f"Continuing from the established state ({previous_summary}), chapter "
+            "Beginning after the established state without replaying it, chapter "
             f"{chapter_no} section {section_no} advances this distinct purpose: {purpose}. "
-            f"The scene explicitly develops the required events: {events}.{carryover} "
+            f"The scene develops only the new required events: {events}. "
             "Characters observe the consequences, react according to their established "
-            "roles, and move the situation forward without skipping causal steps. "
+            "roles, and move the situation forward without replaying completed actions. "
         )
         dialogue = (
             f"We carry the previous situation forward and confront these events now: {events}."
@@ -205,7 +205,7 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
         target_match = re.search(
             r"Aim for approximately (\d+) non-whitespace characters", prompt
         )
-        min_characters = int(character_match.group(1)) if character_match else 1000
+        min_characters = int(character_match.group(1)) if character_match else 850
         max_characters = int(character_match.group(2)) if character_match else 1600
         requested_target = int(target_match.group(1)) if target_match else 1200
         dialogue_characters = sum(
@@ -242,6 +242,7 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
                         "introduced_entities": [],
                         "unresolved_plot_threads": [],
                         "resolved_plot_threads": [],
+                        "completed_event_ids": completed_event_ids,
                         "continuity_summary": (
                             f"Chapter {chapter_no} section {section_no} beat "
                             f"{subsection_no} completed: {events}."
@@ -285,20 +286,24 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
         prompt: str,
         model: str,
         temperature: float,
+        response_schema: dict[str, Any] | None = None,
+        response_name: str = "scenario_section_response",
     ) -> GenerationResponse:
-        response = self.client.responses.create(
-            model=model,
-            input=prompt,
-            temperature=temperature,
-            text={
+        request: dict[str, Any] = {
+            "model": model,
+            "input": prompt,
+            "text": {
                 "format": {
                     "type": "json_schema",
-                    "name": "scenario_section_response",
+                    "name": response_name,
                     "strict": True,
-                    "schema": _scenario_section_response_schema(),
+                    "schema": response_schema or _scenario_section_response_schema(),
                 }
             },
-        )
+        }
+        if _supports_temperature(model):
+            request["temperature"] = temperature
+        response = self.client.responses.create(**request)
         data = parse_llm_json_object(response.output_text)
         usage = getattr(response, "usage", None)
         return GenerationResponse(
@@ -311,6 +316,11 @@ class OpenAITextGenerationProvider(TextGenerationProvider):
                 "response_id": getattr(response, "id", None),
             },
         )
+
+
+def _supports_temperature(model: str) -> bool:
+    """Return whether the Responses API model accepts sampling temperature."""
+    return not model.casefold().startswith("gpt-5.6")
 
 
 def _scenario_section_response_schema() -> dict[str, Any]:
@@ -378,6 +388,7 @@ def _scenario_section_response_schema() -> dict[str, Any]:
             "introduced_entities",
             "unresolved_plot_threads",
             "resolved_plot_threads",
+            "completed_event_ids",
             "continuity_summary",
         ],
         "additionalProperties": False,
@@ -409,6 +420,13 @@ def _scenario_section_response_schema() -> dict[str, Any]:
             "resolved_plot_threads": {
                 "type": "array",
                 "items": non_empty_string,
+            },
+            "completed_event_ids": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "pattern": r"^phase-[0-9]+-beat-[0-9]+$",
+                },
             },
             "continuity_summary": non_empty_string,
         },

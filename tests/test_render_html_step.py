@@ -14,7 +14,18 @@ def _state_updates():
         "introduced_entities": [],
         "unresolved_plot_threads": [],
         "resolved_plot_threads": [],
+        "completed_event_ids": [],
         "continuity_summary": "葵が雨の中で出発を決めた。",
+    }
+
+
+def _story_plan():
+    return {
+        "initial_state_summary": "葵はまだ旅に出ていない。",
+        "final_state_goal": "葵が協力者と旅を始める。",
+        "plot_threads": [],
+        "foreshadowing": [],
+        "character_arcs": [],
     }
 
 
@@ -37,6 +48,7 @@ def test_render_html_step_writes_pages_and_manifest(make_context):
             "scenario_outline": {
                 "title": "物語",
                 "logline": "二人の物語",
+                "story_plan": _story_plan(),
                 "chapters": [
                     {
                         "chapter_no": 1,
@@ -47,7 +59,12 @@ def test_render_html_step_writes_pages_and_manifest(make_context):
                                 "section_no": 1,
                                 "section_title": "雨",
                                 "section_purpose": "出会う",
-                                "key_events": ["出会い"],
+                                "key_events": [
+                                    {
+                                        "event_id": "phase-1-beat-1",
+                                        "description": "二人が出会う。",
+                                    }
+                                ],
                                 "participating_characters": ["c001"],
                             }
                         ],
@@ -123,6 +140,7 @@ def test_render_html_step_auto_loads_generated_json_and_image_assets(make_contex
             "scenario_outline": {
                 "title": "物語",
                 "logline": "二人の物語",
+                "story_plan": _story_plan(),
                 "chapters": [
                     {
                         "chapter_no": 1,
@@ -133,7 +151,12 @@ def test_render_html_step_auto_loads_generated_json_and_image_assets(make_contex
                                 "section_no": 1,
                                 "section_title": "雨",
                                 "section_purpose": "出会う",
-                                "key_events": ["出会い"],
+                                "key_events": [
+                                    {
+                                        "event_id": "phase-1-beat-1",
+                                        "description": "二人が出会う。",
+                                    }
+                                ],
                                 "participating_characters": ["c001"],
                             }
                         ],

@@ -19,7 +19,7 @@ from pipeline.text_generation import (
     resolve_api_key,
 )
 from pipeline.engine import ExecutionOptions, StepExecutionEngine
-from pipeline.steps import build_minimal_steps
+from pipeline.steps import GenerateSectionsStep, build_minimal_steps
 
 
 class FailSecondSectionProvider(TextGenerationProvider):
@@ -36,6 +36,64 @@ class FailSecondSectionProvider(TextGenerationProvider):
             model=model,
             temperature=temperature,
         )
+
+
+def test_section_generation_restores_immutable_target_identity() -> None:
+    generated = {
+        "chapter_no": 99,
+        "section_no": 99,
+        "section_title": "Paraphrased title",
+    }
+
+    GenerateSectionsStep._restore_target_identity(
+        generated,
+        {"chapter_no": 2},
+        {"section_no": 2, "section_title": "受話器が示すもう一人"},
+    )
+
+    assert generated == {
+        "chapter_no": 2,
+        "section_no": 2,
+        "section_title": "受話器が示すもう一人",
+    }
+
+
+def test_section_generation_keeps_dynamic_npcs_out_of_character_state() -> None:
+    generated = {
+        "state_updates": {
+            "character_locations": [
+                {"character_id": "c001", "location": "office"},
+                {
+                    "character_id": "char_mizuno_former_guard",
+                    "location": "safe house",
+                },
+            ],
+            "possessions": [
+                {"character_id": "char_mizuno_former_guard", "items": ["key"]}
+            ],
+            "introduced_entities": [
+                {
+                    "entity_id": "char_mizuno_former_guard",
+                    "type": "character",
+                    "name": "元警備員・水野",
+                    "description": "正式プロフィールを持たない臨時NPC。",
+                }
+            ],
+        }
+    }
+
+    removed = GenerateSectionsStep._normalize_character_state_updates(
+        generated, {"c001"}
+    )
+
+    assert removed == {"char_mizuno_former_guard"}
+    assert generated["state_updates"]["character_locations"] == [
+        {"character_id": "c001", "location": "office"}
+    ]
+    assert generated["state_updates"]["possessions"] == []
+    assert generated["state_updates"]["introduced_entities"][0][
+        "entity_id"
+    ] == "char_mizuno_former_guard"
 
 
 class InvalidFormatOnceProvider(TextGenerationProvider):
@@ -253,10 +311,24 @@ def test_section_is_generated_as_subsections_and_merged(make_context) -> None:
 
     assert len(output["scenario_sections"]) == 1
     assert len(provider.requests) == 3
+    outline_subsections = output["scenario_outline"]["chapters"][0]["sections"][0][
+        "subsections"
+    ]
+    subsection_event_ids = [
+        item["key_events"][0]["event_id"] for item in outline_subsections
+    ]
+    assert len(subsection_event_ids) == len(set(subsection_event_ids)) == 3
+    assert all(item["state_change"] in item["key_events"] for item in outline_subsections)
+    assert all(item["must_not_repeat"] for item in outline_subsections)
     checkpoints = list(
         (Path(context.artifacts_dir) / "sections").glob("*-subsection-*.json")
     )
     assert len(checkpoints) == 3
+    checkpoint_states = [
+        json.loads(path.read_text(encoding="utf-8"))["state_after"]
+        for path in sorted(checkpoints)
+    ]
+    assert [state["current_subsection"] for state in checkpoint_states] == [1, 2, 3]
     blocks = output["scenario_sections"][0]["narrative_blocks"]
     assert len({block["block_id"] for block in blocks}) == len(blocks)
     assert sum(
@@ -325,8 +397,53 @@ def test_openai_provider_uses_responses_api_and_parses_json() -> None:
         "introduced_entities",
         "unresolved_plot_threads",
         "resolved_plot_threads",
+        "completed_event_ids",
         "continuity_summary",
     }
+
+
+def test_openai_provider_accepts_step_specific_response_schema() -> None:
+    responses = FakeResponsesClient('{"character_profiles": []}')
+    provider = OpenAITextGenerationProvider(
+        api_key="not-used-by-fake",
+        timeout_seconds=30,
+        client=SimpleNamespace(responses=responses),
+    )
+    schema = {
+        "type": "object",
+        "required": ["character_profiles"],
+        "additionalProperties": False,
+        "properties": {"character_profiles": {"type": "array"}},
+    }
+
+    provider.generate_json(
+        prompt="generate profiles",
+        model="gpt-test",
+        temperature=0.2,
+        response_schema=schema,
+        response_name="character_profile_generation",
+    )
+
+    response_format = responses.calls[0]["text"]["format"]
+    assert response_format["name"] == "character_profile_generation"
+    assert response_format["schema"] == schema
+
+
+def test_openai_provider_omits_temperature_for_gpt_5_6() -> None:
+    responses = FakeResponsesClient('{"scenario_sections": []}')
+    provider = OpenAITextGenerationProvider(
+        api_key="not-used-by-fake",
+        timeout_seconds=30,
+        client=SimpleNamespace(responses=responses),
+    )
+
+    provider.generate_json(
+        prompt="generate",
+        model="gpt-5.6-luna",
+        temperature=0.2,
+    )
+
+    assert "temperature" not in responses.calls[0]
 
 
 def test_openai_provider_rejects_non_json_output() -> None:

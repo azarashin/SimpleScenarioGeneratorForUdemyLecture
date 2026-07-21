@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/step-04-review-sections.schema.json",
+  "title": "Step 04 Review Sections Contract",
+  "type": "object",
+  "required": ["input", "output"],
+  "additionalProperties": false,
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": ["scenario_idea", "character_profiles", "scenario_outline", "scenario_sections"],
+      "additionalProperties": false,
+      "properties": {
+        "scenario_idea": {"$ref": "input.schema.json#/properties/scenario_idea"},
+        "character_profiles": {"$ref": "character-profiles.schema.json"},
+        "scenario_outline": {"$ref": "scenario-outline.schema.json"},
+        "scenario_sections": {"$ref": "scenario-sections.schema.json"}
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["scenario_sections", "section_review_reports"],
+      "additionalProperties": false,
+      "properties": {
+        "scenario_sections": {"$ref": "scenario-sections.schema.json"},
+        "section_review_reports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["chapter_no", "section_no", "report"],
+            "additionalProperties": false,
+            "properties": {
+              "chapter_no": {"$ref": "common.schema.json#/$defs/positiveInteger"},
+              "section_no": {"$ref": "common.schema.json#/$defs/positiveInteger"},
+              "report": {"$ref": "scenario-review-report.schema.json"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

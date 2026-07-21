@@ -5,10 +5,18 @@
     "timeout_seconds": 60,
     "api_key_env": "TEXT_GENERATION_API_KEY"
   },
+  "character_profile_generation": {
+    "enabled": false,
+    "require_review": true
+  },
+  "planning_input_generation": {
+    "enabled": false,
+    "require_review": true
+  },
   "scenario_body_generation": {
     "subsections_per_section": 3,
     "target_characters": 1200,
-    "min_characters": 1000,
+    "min_characters": 850,
     "max_characters": 1600,
     "min_dialogue_blocks": 6,
     "max_dialogue_blocks": 14,

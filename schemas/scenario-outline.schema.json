@@ -6,6 +6,7 @@
     "required": [
         "title",
         "logline",
+        "story_plan",
         "chapters"
     ],
     "additionalProperties": false,
@@ -15,6 +16,33 @@
         },
         "logline": {
             "$ref": "common.schema.json#/$defs/nonEmptyString"
+        },
+        "story_plan": {
+            "type": "object",
+            "required": [
+                "initial_state_summary",
+                "final_state_goal",
+                "plot_threads",
+                "foreshadowing",
+                "character_arcs"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "initial_state_summary": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                "final_state_goal": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                "plot_threads": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/plannedPlotThread"}
+                },
+                "foreshadowing": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/plannedForeshadow"}
+                },
+                "character_arcs": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/plannedCharacterArc"}
+                }
+            }
         },
         "chapters": {
             "type": "array",
@@ -65,7 +93,7 @@
                                     "type": "array",
                                     "minItems": 1,
                                     "items": {
-                                        "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                        "$ref": "#/$defs/storyEvent"
                                     }
                                 },
                                 "participating_characters": {
@@ -84,7 +112,12 @@
                                             "subsection_no",
                                             "subsection_title",
                                             "subsection_purpose",
-                                            "key_events"
+                                            "key_events",
+                                            "start_state",
+                                            "state_change",
+                                            "end_state",
+                                            "planned_state_updates",
+                                            "must_not_repeat"
                                         ],
                                         "additionalProperties": false,
                                         "properties": {
@@ -101,6 +134,25 @@
                                                 "type": "array",
                                                 "minItems": 1,
                                                 "items": {
+                                                    "$ref": "#/$defs/storyEvent"
+                                                }
+                                            },
+                                            "start_state": {
+                                                "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                            },
+                                            "state_change": {
+                                                "$ref": "#/$defs/storyEvent"
+                                            },
+                                            "end_state": {
+                                                "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                            },
+                                            "planned_state_updates": {
+                                                "$ref": "#/$defs/plannedStateUpdates"
+                                            },
+                                            "must_not_repeat": {
+                                                "type": "array",
+                                                "minItems": 1,
+                                                "items": {
                                                     "$ref": "common.schema.json#/$defs/nonEmptyString"
                                                 }
                                             }
@@ -110,6 +162,96 @@
                             }
                         }
                     }
+                }
+            }
+        }
+    },
+    "$defs": {
+        "plannedPlotThread": {
+            "type": "object",
+            "required": ["thread_id", "description", "open_event_id", "resolve_event_id"],
+            "additionalProperties": false,
+            "properties": {
+                "thread_id": {"type": "string", "minLength": 1},
+                "description": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                "open_event_id": {"type": "string", "minLength": 1},
+                "resolve_event_id": {"type": ["string", "null"]}
+            }
+        },
+        "plannedForeshadow": {
+            "type": "object",
+            "required": ["clue_id", "description", "plant_event_id", "payoff_event_id"],
+            "additionalProperties": false,
+            "properties": {
+                "clue_id": {"type": "string", "minLength": 1},
+                "description": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                "plant_event_id": {"type": "string", "minLength": 1},
+                "payoff_event_id": {"type": "string", "minLength": 1}
+            }
+        },
+        "plannedCharacterArc": {
+            "type": "object",
+            "required": ["character_id", "initial_state", "turning_event_ids", "final_state"],
+            "additionalProperties": false,
+            "properties": {
+                "character_id": {"$ref": "common.schema.json#/$defs/characterId"},
+                "initial_state": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                "turning_event_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "final_state": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+            }
+        },
+        "plannedStateUpdates": {
+            "type": "object",
+            "required": [
+                "character_locations",
+                "possessions",
+                "known_information",
+                "relationship_changes",
+                "introduced_entities",
+                "opened_thread_ids",
+                "resolved_thread_ids",
+                "planted_clue_ids",
+                "paid_off_clue_ids",
+                "character_arc_changes",
+                "resulting_state_summary"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "character_locations": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}},
+                "possessions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}},
+                "known_information": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}},
+                "relationship_changes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}},
+                "introduced_entities": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/nonEmptyString"}},
+                "opened_thread_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "resolved_thread_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "planted_clue_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "paid_off_clue_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "character_arc_changes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["character_id", "description"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "character_id": {"$ref": "common.schema.json#/$defs/characterId"},
+                            "description": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+                        }
+                    }
+                },
+                "resulting_state_summary": {"$ref": "common.schema.json#/$defs/nonEmptyString"}
+            }
+        },
+        "storyEvent": {
+            "type": "object",
+            "required": ["event_id", "description"],
+            "additionalProperties": false,
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "pattern": "^phase-[0-9]+-beat-[0-9]+$"
+                },
+                "description": {
+                    "$ref": "common.schema.json#/$defs/nonEmptyString"
                 }
             }
         }

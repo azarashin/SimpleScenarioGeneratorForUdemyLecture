@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from PIL import Image
+from jsonschema import Draft202012Validator
 
 from .asset_manager import CharacterAssetResolver
 from .artifact_loader import PipelineArtifactLoader
@@ -29,6 +30,109 @@ from .html_validation import HtmlOutputValidator
 from .types import Step, StepContext, StepResult
 
 
+class GeneratePlanningInputStep(Step):
+    name = "step-00-generate-planning-input"
+    schema_name = "step-00-generate-planning-input.schema.json"
+    input_keys = ("rough_idea",)
+
+    def run(self, context: StepContext) -> StepResult:
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "schemas"
+            / "ai-pipeline-input.schema.json"
+        )
+        response_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        api_response_schema = dict(response_schema)
+        api_response_schema.pop("$schema", None)
+        rough_idea = str(context.shared_data["rough_idea"]).strip()
+        if not rough_idea:
+            raise ValueError("The free-form scenario idea must not be empty.")
+        generation_prompt = (
+            "Convert the following free-form scenario idea into a concrete planning input "
+            "for a scenario generation pipeline. Preserve explicit user intent and fill only "
+            "missing details needed to create an outline and character profiles. Do not import "
+            "themes, terminology, or facts from unrelated requests. Character IDs must be unique "
+            "lowercase identifiers such as c001, c002. must_include and must_avoid must clearly "
+            "separate requirements from prohibitions. Generate every character attribute in the "
+            "schema with concrete story-relevant detail; do not reduce characters to names and "
+            "summaries. Differentiate their values, strengths, weaknesses, growth arcs, voices, "
+            "relationships, visual identity, and expression rules. Relationships may reference "
+            "only IDs generated in this response. emotion_range must contain neutral, and every "
+            "expression rule must use an expression in emotion_range. Return only JSON matching "
+            "the schema.\n\n"
+            "FREE-FORM IDEA\n"
+            f"{rough_idea}\n\n"
+            "OUTPUT JSON SCHEMA\n"
+            f"{json.dumps(response_schema, ensure_ascii=False, indent=2)}"
+        )
+        response = context.text_generation_provider.generate_json(
+            prompt=generation_prompt,
+            model=context.config.text_generation.model,
+            temperature=context.config.temperature_for(self.name),
+            response_schema=api_response_schema,
+            response_name="planning_input_generation",
+        )
+        errors = sorted(
+            Draft202012Validator(response_schema).iter_errors(response.data),
+            key=lambda error: list(error.path),
+        )
+        if errors:
+            error = errors[0]
+            location = ".".join(str(part) for part in error.path) or "<root>"
+            raise ValueError(
+                f"AI planning input schema validation failed at {location}: "
+                f"{error.message}"
+            )
+        character_ids = [
+            item["character_id"] for item in response.data["character_overviews"]
+        ]
+        if len(character_ids) != len(set(character_ids)):
+            raise ValueError("AI planning input contains duplicate character IDs.")
+        known_ids = set(character_ids)
+        for character in response.data["character_overviews"]:
+            character_id = character["character_id"]
+            unknown_relationship_ids = {
+                relationship["target_character_id"]
+                for relationship in character["relationships"]
+                if relationship["target_character_id"] not in known_ids
+            }
+            if unknown_relationship_ids:
+                raise ValueError(
+                    f"AI planning input character {character_id} references unknown "
+                    f"character IDs: {sorted(unknown_relationship_ids)}"
+                )
+            emotion_range = set(character["emotion_range"])
+            if "neutral" not in emotion_range:
+                raise ValueError(
+                    f"AI planning input character {character_id} emotion_range must "
+                    "include neutral."
+                )
+            unknown_rule_expressions = {
+                rule["expression"]
+                for rule in character["expression_rules"]
+                if rule["expression"] not in emotion_range
+            }
+            if unknown_rule_expressions:
+                raise ValueError(
+                    f"AI planning input character {character_id} has expression rules "
+                    f"outside emotion_range: {sorted(unknown_rule_expressions)}"
+                )
+        return StepResult(
+            output={"input": response.data},
+            prompt=generation_prompt,
+            prompt_version="ai-v1",
+            prompt_hash=hashlib.sha256(generation_prompt.encode("utf-8")).hexdigest(),
+            model=response.model,
+            temperature=context.config.temperature_for(self.name),
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            metadata={"human_review_required": True},
+        )
+
+    def requires_review_after_success(self, context: StepContext) -> bool:
+        return context.config.planning_input_generation.require_review
+
+
 class GenerateCharacterProfilesStep(Step):
     name = "step-01-generate-character-profiles"
     schema_name = "step-01-generate-character-profiles.schema.json"
@@ -37,32 +141,124 @@ class GenerateCharacterProfilesStep(Step):
     def run(self, context: StepContext) -> StepResult:
         prompt = resolve_step_prompt(context, self.name)
         input_data = context.shared_data["input"]
+        if context.config.character_profile_generation.enabled:
+            schema_path = (
+                Path(__file__).resolve().parent.parent
+                / "schemas"
+                / "ai-character-profiles.schema.json"
+            )
+            response_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            api_response_schema = dict(response_schema)
+            api_response_schema.pop("$schema", None)
+            generation_prompt = self._ai_generation_prompt(
+                input_data,
+                response_schema,
+            )
+            response = context.text_generation_provider.generate_json(
+                prompt=generation_prompt,
+                model=context.config.text_generation.model,
+                temperature=context.config.temperature_for(self.name),
+                response_schema=api_response_schema,
+                response_name="character_profile_generation",
+            )
+            schema_errors = sorted(
+                Draft202012Validator(response_schema).iter_errors(response.data),
+                key=lambda error: list(error.path),
+            )
+            if schema_errors:
+                error = schema_errors[0]
+                location = ".".join(str(part) for part in error.path) or "<root>"
+                raise ValueError(
+                    "AI character profile schema validation failed at "
+                    f"{location}: {error.message}"
+                )
+            return StepResult(
+                output={"character_profiles": response.data["character_profiles"]},
+                prompt=generation_prompt,
+                prompt_version="ai-v1",
+                prompt_hash=hashlib.sha256(
+                    generation_prompt.encode("utf-8")
+                ).hexdigest(),
+                model=response.model,
+                temperature=context.config.temperature_for(self.name),
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                metadata={"human_review_required": True},
+            )
+
         profiles: list[dict[str, Any]] = []
         for item in input_data["character_overviews"]:
+            speech_profile = item.get("speech_profile", {})
             profiles.append(
                 {
                     "character_id": item["character_id"],
                     "name": item["name"],
                     "role": item["role"],
                     "personality": {
-                        "core_traits": ["thoughtful"],
-                        "values": ["integrity"],
-                        "weaknesses": ["hesitation"],
+                        "core_traits": item.get(
+                            "personality_traits", ["thoughtful"]
+                        ),
+                        "values": item.get("values", ["integrity"]),
+                        "strengths": item.get("strengths", []),
+                        "weaknesses": item.get("weaknesses", ["hesitation"]),
                     },
                     "speech": {
-                        "style": item.get("speech_style_hint", "natural"),
-                        "first_person": "I",
-                        "verbal_tics": [],
+                        "style": speech_profile.get(
+                            "style", item.get("speech_style_hint", "natural")
+                        ),
+                        "sentence_length": speech_profile.get(
+                            "sentence_length", "medium"
+                        ),
+                        "politeness_level": speech_profile.get(
+                            "politeness_level", "context-appropriate"
+                        ),
+                        "first_person": speech_profile.get("first_person", "I"),
+                        "second_person": speech_profile.get(
+                            "second_person", "name or role"
+                        ),
+                        "verbal_tics": speech_profile.get("common_phrases", []),
+                        "forbidden_phrases": speech_profile.get(
+                            "forbidden_phrases", []
+                        ),
+                        "sample_lines": speech_profile.get("sample_lines", []),
                     },
                     "appearance": {
                         "age_impression": item.get("age_range", "adult"),
+                        "gender": item.get("gender", "unknown"),
+                        "position": item.get("position", item["role"]),
                         "features": [item.get("appearance_hint", "distinctive")],
-                        "costume": "scene-appropriate clothing",
+                        "costume": item.get(
+                            "costume", "scene-appropriate clothing"
+                        ),
+                        "standing_pose": item.get(
+                            "standing_pose", "relaxed neutral standing pose"
+                        ),
+                        "image_prompt_hint": item.get(
+                            "image_prompt_hint", item.get("appearance_hint", "distinctive")
+                        ),
                     },
+                    "background": item.get("background_hint", item["summary"]),
+                    "narrative": {
+                        "conversation_role": item.get(
+                            "conversation_role", item["role"]
+                        ),
+                        "growth_arc": item.get(
+                            "growth_arc", "Develop through the central conflict"
+                        ),
+                        "relationship_to_protagonist": item.get(
+                            "relationship_to_protagonist", "not specified"
+                        ),
+                    },
+                    "relationships": item.get("relationships", []),
                     "emotion_model": {
                         "available_expressions": [
                             name for name, _ in EXPRESSION_CONCEPTS
                         ],
+                        "preferred_expressions": item.get(
+                            "emotion_range",
+                            [name for name, _ in EXPRESSION_CONCEPTS],
+                        ),
+                        "expression_rules": item.get("expression_rules", []),
                     },
                 }
             )
@@ -78,6 +274,37 @@ class GenerateCharacterProfilesStep(Step):
             output_tokens=240,
         )
 
+    def requires_review_after_success(self, context: StepContext) -> bool:
+        config = context.config.character_profile_generation
+        return config.enabled and config.require_review
+
+    @staticmethod
+    def _ai_generation_prompt(
+        input_data: dict[str, Any], response_schema: dict[str, Any]
+    ) -> str:
+        canonical_expressions = [name for name, _ in EXPRESSION_CONCEPTS]
+        return (
+            "You are designing canonical character profiles for a structured scenario.\n\n"
+            "SCENARIO IDEA\n"
+            f"{json.dumps(input_data['scenario_idea'], ensure_ascii=False, indent=2)}\n\n"
+            "CHARACTER SEEDS\n"
+            f"{json.dumps(input_data['character_overviews'], ensure_ascii=False, indent=2)}\n\n"
+            "CANONICAL EXPRESSIONS\n"
+            f"{json.dumps(canonical_expressions, ensure_ascii=False)}\n\n"
+            "OUTPUT JSON SCHEMA\n"
+            f"{json.dumps(response_schema, ensure_ascii=False, indent=2)}\n\n"
+            "Requirements:\n"
+            "- Preserve every character_id, name, and role exactly; do not add or remove characters.\n"
+            "- Expand underspecified seeds into concrete, mutually consistent profiles useful for story, dialogue, continuity, and image generation.\n"
+            "- Avoid generic traits. Make strengths, weaknesses, values, growth arcs, speech differences, and relationships produce usable dramatic tension.\n"
+            "- relationships may reference only character IDs from CHARACTER SEEDS.\n"
+            "- available_expressions must equal CANONICAL EXPRESSIONS in exactly that order.\n"
+            "- preferred_expressions must be a non-empty subset containing neutral.\n"
+            "- Every expression_rules.expression must occur in preferred_expressions.\n"
+            "- Provide at least three natural sample lines per character and keep forbidden_phrases clearly distinct from their voice.\n"
+            "- Return only the JSON object required by OUTPUT JSON SCHEMA."
+        )
+
 
 class GenerateOutlineStep(Step):
     name = "step-02-generate-outline"
@@ -87,8 +314,37 @@ class GenerateOutlineStep(Step):
     def run(self, context: StepContext) -> StepResult:
         prompt = resolve_step_prompt(context, self.name)
         input_data = context.shared_data["input"]
-        profile_ids = [x["character_id"] for x in context.shared_data["character_profiles"]]
+        if context.config.character_profile_generation.enabled:
+            schema_path = (
+                Path(__file__).resolve().parent.parent
+                / "schemas"
+                / "ai-character-profiles.schema.json"
+            )
+            response_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            schema_errors = sorted(
+                Draft202012Validator(response_schema).iter_errors(
+                    {"character_profiles": context.shared_data["character_profiles"]}
+                ),
+                key=lambda error: list(error.path),
+            )
+            if schema_errors:
+                error = schema_errors[0]
+                location = ".".join(str(part) for part in error.path) or "<root>"
+                raise ValueError(
+                    "Reviewed character profile schema validation failed at "
+                    f"{location}: {error.message}"
+                )
+        PipelineConsistencyChecker().check(
+            context.shared_data,
+            {"character_profiles": context.shared_data["character_profiles"]},
+        )
+        profiles = context.shared_data["character_profiles"]
         target = input_data["scenario_idea"]["target_length"]
+        participation = self._plan_participation(
+            profiles,
+            chapter_count=target["chapter_count"],
+            sections_per_chapter=target["sections_per_chapter"],
+        )
 
         chapters = []
         for chapter_no in range(1, target["chapter_count"] + 1):
@@ -99,35 +355,93 @@ class GenerateOutlineStep(Step):
                     f"Develop the theme '{input_data['scenario_idea']['theme']}' "
                     f"through story phase {phase}"
                 )
-                key_events = [
-                    f"phase-{phase}-conflict emerges",
-                    f"phase-{phase}-choice changes the situation",
-                    f"phase-{phase}-consequence points forward",
-                ]
                 subsection_count = (
                     context.config.scenario_body_generation.subsections_per_section
                 )
-                subsections = [
-                    {
-                        "subsection_no": subsection_no,
-                        "subsection_title": f"Beat {chapter_no}-{section_no}-{subsection_no}",
-                        "subsection_purpose": (
-                            f"Advance {purpose} through beat {subsection_no} of "
-                            f"{subsection_count}"
-                        ),
-                        "key_events": self._events_for_subsection(
-                            key_events, subsection_count, subsection_no
-                        ),
-                    }
+                key_events = [
+                    self._unique_beat_event(phase, subsection_no, subsection_count)
                     for subsection_no in range(1, subsection_count + 1)
                 ]
+                subsections = []
+                for subsection_no, event in enumerate(key_events, start=1):
+                    previous_event = (
+                        key_events[subsection_no - 2]
+                        if subsection_no > 1
+                        else None
+                    )
+                    next_event = (
+                        key_events[subsection_no]
+                        if subsection_no < subsection_count
+                        else None
+                    )
+                    subsections.append(
+                        {
+                            "subsection_no": subsection_no,
+                            "subsection_title": (
+                                f"Beat {chapter_no}-{section_no}-{subsection_no}"
+                            ),
+                            "subsection_purpose": (
+                                f"Advance {purpose} by completing a new, irreversible "
+                                f"change in beat {subsection_no} of {subsection_count}"
+                            ),
+                            "key_events": [event],
+                            "start_state": (
+                                "Begin after the cumulative recent_context; the prior "
+                                "section is already complete."
+                                if previous_event is None
+                                else (
+                                    "The previous outcome is already complete: "
+                                    f"{previous_event['description']}"
+                                )
+                            ),
+                            "state_change": event,
+                            "end_state": (
+                                f"Complete '{event['description']}' and hand off to "
+                                f"'{next_event['description']}'."
+                                if next_event is not None
+                                else (
+                                    f"Complete '{event['description']}' and establish "
+                                    "the next section state."
+                                )
+                            ),
+                            "planned_state_updates": {
+                                "character_locations": [],
+                                "possessions": [],
+                                "known_information": [event["description"]],
+                                "relationship_changes": [],
+                                "introduced_entities": [],
+                                "opened_thread_ids": [],
+                                "resolved_thread_ids": [],
+                                "planted_clue_ids": [],
+                                "paid_off_clue_ids": [],
+                                "character_arc_changes": [],
+                                "resulting_state_summary": (
+                                    f"After {event['description']} the story advances "
+                                    f"beyond beat {subsection_no}."
+                                ),
+                            },
+                            "must_not_repeat": [
+                                "Do not restart the section introduction or repeat prior setup.",
+                                (
+                                    "Do not replay the previous section's completed action."
+                                    if previous_event is None
+                                    else (
+                                        "Do not replay or re-explain the previous change: "
+                                        f"{previous_event['description']}"
+                                    )
+                                ),
+                            ],
+                        }
+                    )
                 sections.append(
                     {
                         "section_no": section_no,
                         "section_title": f"Section {chapter_no}-{section_no}",
                         "section_purpose": purpose,
                         "key_events": key_events,
-                        "participating_characters": profile_ids,
+                        "participating_characters": participation[
+                            (chapter_no, section_no)
+                        ],
                         "subsections": subsections,
                     }
                 )
@@ -143,6 +457,16 @@ class GenerateOutlineStep(Step):
         outline = {
             "title": input_data["scenario_idea"]["title"],
             "logline": input_data["scenario_idea"]["premise"],
+            "story_plan": {
+                "initial_state_summary": input_data["scenario_idea"]["premise"],
+                "final_state_goal": (
+                    f"Resolve the central conflict while expressing the theme "
+                    f"'{input_data['scenario_idea']['theme']}'."
+                ),
+                "plot_threads": [],
+                "foreshadowing": [],
+                "character_arcs": [],
+            },
             "chapters": chapters,
         }
 
@@ -159,8 +483,14 @@ class GenerateOutlineStep(Step):
 
     @staticmethod
     def _events_for_subsection(
-        events: list[str], count: int, subsection_no: int
-    ) -> list[str]:
+        events: list[dict[str, str]], count: int, subsection_no: int
+    ) -> list[dict[str, str]]:
+        if count > len(events):
+            raise ValueError(
+                "Cannot assign subsection events by recycling completed events: "
+                f"{count} subsections require at least {count} unique events, got "
+                f"{len(events)}"
+            )
         assigned = [
             event
             for event_index, event in enumerate(events)
@@ -168,7 +498,219 @@ class GenerateOutlineStep(Step):
         ]
         if assigned:
             return assigned
-        return [events[(subsection_no - 1) % len(events)]]
+        raise ValueError(f"No unique event is available for subsection {subsection_no}")
+
+    @staticmethod
+    def _unique_beat_event(
+        phase: int, beat_no: int, beat_count: int
+    ) -> dict[str, str]:
+        beat_roles = (
+            "establish the changed situation",
+            "introduce a concrete obstacle",
+            "discover actionable information",
+            "force a consequential response",
+            "apply the consequence and escalate",
+            "commit to the next course of action",
+        )
+        role_index = min(
+            len(beat_roles) - 1,
+            (beat_no - 1) * len(beat_roles) // max(1, beat_count),
+        )
+        return {
+            "event_id": f"phase-{phase}-beat-{beat_no}",
+            "description": f"{beat_roles[role_index].capitalize()}.",
+        }
+
+    @classmethod
+    def _plan_participation(
+        cls,
+        profiles: list[dict[str, Any]],
+        *,
+        chapter_count: int,
+        sections_per_chapter: int,
+    ) -> dict[tuple[int, int], list[str]]:
+        """Plan gradual character introductions and bounded scene casts."""
+        total_sections = chapter_count * sections_per_chapter
+        ordered_ids = [profile["character_id"] for profile in profiles]
+        profile_by_id = {profile["character_id"]: profile for profile in profiles}
+
+        protagonists = [
+            character_id
+            for character_id in ordered_ids
+            if cls._is_role(profile_by_id[character_id], "protagonist")
+        ]
+        if not protagonists:
+            protagonists = ordered_ids[:1]
+
+        companions = [
+            character_id
+            for character_id in ordered_ids
+            if character_id not in protagonists
+            and cls._is_role(profile_by_id[character_id], "companion")
+            and cls._chapter_scope(profile_by_id[character_id], chapter_count) is None
+        ]
+        core_ids = [*protagonists, *companions[:1]]
+        secondary_ids = [item for item in ordered_ids if item not in core_ids]
+        secondary_ids.sort(
+            key=lambda item: (
+                cls._role_priority(profile_by_id[item]),
+                ordered_ids.index(item),
+            )
+        )
+
+        introduction_slot: dict[str, int] = {item: 0 for item in core_ids}
+        unscoped = [
+            item
+            for item in secondary_ids
+            if cls._chapter_scope(profile_by_id[item], chapter_count) is None
+        ]
+        introduction_horizon = max(1, total_sections // 2)
+        for index, character_id in enumerate(unscoped):
+            introduction_slot[character_id] = 1 + (
+                index * max(1, introduction_horizon - 1) // max(1, len(unscoped))
+            )
+
+        for chapter_no in range(1, chapter_count + 1):
+            scoped = [
+                item
+                for item in secondary_ids
+                if (scope := cls._chapter_scope(profile_by_id[item], chapter_count))
+                is not None
+                and chapter_no in scope
+                and item not in introduction_slot
+            ]
+            for index, character_id in enumerate(scoped):
+                section_offset = (
+                    index * sections_per_chapter // max(1, len(scoped))
+                )
+                introduction_slot[character_id] = (
+                    (chapter_no - 1) * sections_per_chapter + section_offset
+                )
+
+        result: dict[tuple[int, int], list[str]] = {}
+        for slot in range(total_sections):
+            chapter_no = slot // sections_per_chapter + 1
+            section_no = slot % sections_per_chapter + 1
+            progress = slot / max(1, total_sections - 1)
+            if slot == 0:
+                cast_limit = 2
+            elif progress < 0.34:
+                cast_limit = 3
+            elif progress < 0.67:
+                cast_limit = 4
+            else:
+                cast_limit = 5
+
+            eligible = [
+                item
+                for item in ordered_ids
+                if introduction_slot.get(item, total_sections) <= slot
+                and cls._eligible_for_chapter(
+                    profile_by_id[item], chapter_no, chapter_count
+                )
+            ]
+            selected = [item for item in core_ids if item in eligible][:cast_limit]
+            newcomers = [
+                item
+                for item in eligible
+                if introduction_slot.get(item) == slot and item not in selected
+            ]
+            for character_id in newcomers:
+                if len(selected) >= cast_limit:
+                    break
+                selected.append(character_id)
+
+            rotating = [item for item in eligible if item not in selected]
+            if rotating:
+                offset = slot % len(rotating)
+                rotating = rotating[offset:] + rotating[:offset]
+            for character_id in rotating:
+                if len(selected) >= cast_limit:
+                    break
+                selected.append(character_id)
+
+            result[(chapter_no, section_no)] = selected or protagonists[:1]
+        return result
+
+    @staticmethod
+    def _profile_role_text(profile: dict[str, Any]) -> str:
+        narrative = profile.get("narrative", {})
+        return " ".join(
+            str(value).casefold()
+            for value in (
+                profile.get("role", ""),
+                narrative.get("conversation_role", ""),
+                narrative.get("relationship_to_protagonist", ""),
+            )
+        )
+
+    @classmethod
+    def _is_role(cls, profile: dict[str, Any], category: str) -> bool:
+        role = str(profile.get("role", "")).casefold()
+        narrative = profile.get("narrative", {})
+        conversation_role = str(narrative.get("conversation_role", "")).casefold()
+        relationship = str(
+            narrative.get("relationship_to_protagonist", "")
+        ).strip().casefold()
+        if category == "protagonist":
+            return any(
+                keyword in role
+                for keyword in ("主人公", "主役", "protagonist", "main character", "hero")
+            ) or relationship in {"本人", "self"}
+        return any(
+            keyword in f"{role} {conversation_role}"
+            for keyword in (
+                "相棒",
+                "助手",
+                "パートナー",
+                "companion",
+                "assistant",
+                "sidekick",
+                "partner",
+            )
+        )
+
+    @classmethod
+    def _role_priority(cls, profile: dict[str, Any]) -> int:
+        role_text = cls._profile_role_text(profile)
+        categories = (
+            (("師匠", "導き手", "mentor", "guide"), 0),
+            (("刑事", "捜査", "investigator", "detective"), 1),
+            (("ライバル", "rival"), 2),
+            (("親友", "友人", "friend"), 3),
+            (("敵", "犯人", "antagonist", "villain"), 4),
+        )
+        return next(
+            (
+                priority
+                for words, priority in categories
+                if any(word in role_text for word in words)
+            ),
+            2,
+        )
+
+    @classmethod
+    def _chapter_scope(
+        cls, profile: dict[str, Any], chapter_count: int
+    ) -> set[int] | None:
+        role_text = cls._profile_role_text(profile)
+        match = re.search(r"第\s*(\d+)\s*(?:[〜～\-]\s*(\d+))?\s*(?:話|章)", role_text)
+        if match is None:
+            match = re.search(
+                r"chapter\s*(\d+)\s*(?:[-–—]\s*(\d+))?", role_text
+            )
+        if match is None:
+            return None
+        start = max(1, int(match.group(1)))
+        end = min(chapter_count, int(match.group(2) or match.group(1)))
+        return set(range(start, end + 1)) if start <= end else set()
+
+    @classmethod
+    def _eligible_for_chapter(
+        cls, profile: dict[str, Any], chapter_no: int, chapter_count: int
+    ) -> bool:
+        scope = cls._chapter_scope(profile, chapter_count)
+        return scope is None or chapter_no in scope
 
 
 class GenerateCharacterImagesStep(Step):
@@ -733,6 +1275,7 @@ class GenerateSectionsStep(Step):
         for chapter in outline["chapters"]:
             for section in chapter["sections"]:
                 merged_blocks: list[dict[str, Any]] = []
+                merged_updates: dict[str, Any] | None = None
                 subsections = self._subsections_for(
                     section, quality_config.subsections_per_section
                 )
@@ -746,6 +1289,9 @@ class GenerateSectionsStep(Step):
                         "participating_characters": section[
                             "participating_characters"
                         ],
+                        # Keep the active contract attached for compact plan-progress
+                        # accounting after the generated prose passes validation.
+                        "subsections": [subsection],
                     }
                     rendered_prompt = prompt_builder.build(
                         scenario_idea=scenario_idea,
@@ -832,12 +1378,37 @@ class GenerateSectionsStep(Step):
                                 "Subsection generation must return exactly one section"
                             )
                         generated_section = response.data["scenario_sections"][0]
+                        self._restore_target_identity(
+                            generated_section, chapter, section
+                        )
+                        removed_character_ids = (
+                            self._normalize_character_state_updates(
+                                generated_section, valid_character_ids
+                            )
+                        )
+                        if removed_character_ids:
+                            context.trace_logger.log(
+                                {
+                                    "run_id": context.run_id,
+                                    "step": self.name,
+                                    "event": "unknown_character_state_updates_removed",
+                                    "chapter_no": chapter["chapter_no"],
+                                    "section_no": section["section_no"],
+                                    "subsection_no": subsection_no,
+                                    "character_ids": sorted(removed_character_ids),
+                                }
+                            )
                         self._validate_target(generated_section, chapter, section)
                         self._normalize_block_ids(
                             generated_section,
                             chapter_no=chapter["chapter_no"],
                             section_no=section["section_no"],
                             subsection_no=subsection_no,
+                        )
+                        self._validate_forward_progress(
+                            generated_section,
+                            previous_state=previous_state,
+                            target_section=target_section,
                         )
                         repair_input_tokens = 0
                         repair_output_tokens = 0
@@ -904,6 +1475,28 @@ class GenerateSectionsStep(Step):
                                     repaired_section = repair_response.data[
                                         "scenario_sections"
                                     ][0]
+                                    self._restore_target_identity(
+                                        repaired_section, chapter, section
+                                    )
+                                    removed_character_ids = (
+                                        self._normalize_character_state_updates(
+                                            repaired_section, valid_character_ids
+                                        )
+                                    )
+                                    if removed_character_ids:
+                                        context.trace_logger.log(
+                                            {
+                                                "run_id": context.run_id,
+                                                "step": self.name,
+                                                "event": "unknown_character_state_updates_removed",
+                                                "chapter_no": chapter["chapter_no"],
+                                                "section_no": section["section_no"],
+                                                "subsection_no": subsection_no,
+                                                "character_ids": sorted(
+                                                    removed_character_ids
+                                                ),
+                                            }
+                                        )
                                     self._validate_target(
                                         repaired_section, chapter, section
                                     )
@@ -912,6 +1505,11 @@ class GenerateSectionsStep(Step):
                                         chapter_no=chapter["chapter_no"],
                                         section_no=section["section_no"],
                                         subsection_no=subsection_no,
+                                    )
+                                    self._validate_forward_progress(
+                                        repaired_section,
+                                        previous_state=previous_state,
+                                        target_section=target_section,
                                     )
                                     quality_checker.check_section(
                                         generated_section=repaired_section,
@@ -984,6 +1582,7 @@ class GenerateSectionsStep(Step):
                         state_after = advance_scenario_state(
                             previous_state,
                             chapter_no=chapter["chapter_no"],
+                            subsection_no=subsection_no,
                             outline_section=target_section,
                             generated_section=generated_section,
                         )
@@ -1013,14 +1612,20 @@ class GenerateSectionsStep(Step):
                         input_tokens += repair_input_tokens
                         output_tokens += repair_output_tokens
                     merged_blocks.extend(generated_section["narrative_blocks"])
+                    merged_updates = self._merge_state_updates(
+                        merged_updates,
+                        generated_section["state_updates"],
+                    )
                     previous_state = state_after
+                if merged_updates is None:
+                    raise ValueError("Section generation produced no subsection updates")
                 sections_out.append(
                     {
                         "chapter_no": chapter["chapter_no"],
                         "section_no": section["section_no"],
                         "section_title": section["section_title"],
                         "narrative_blocks": merged_blocks,
-                        "state_updates": generated_section["state_updates"],
+                        "state_updates": merged_updates,
                     }
                 )
 
@@ -1055,19 +1660,64 @@ class GenerateSectionsStep(Step):
         if existing and len(existing) == count:
             return existing
         events = section["key_events"]
-        return [
-            {
+        assigned_events = [
+            GenerateOutlineStep._events_for_subsection(events, count, index)[0]
+            for index in range(1, count + 1)
+        ]
+        subsections = []
+        for index, event in enumerate(assigned_events, start=1):
+            previous_event = assigned_events[index - 2] if index > 1 else None
+            next_event = assigned_events[index] if index < count else None
+            subsections.append({
                 "subsection_no": index,
                 "subsection_title": f"Beat {section['section_no']}-{index}",
                 "subsection_purpose": (
                     f"{section['section_purpose']} (beat {index} of {count})"
                 ),
-                "key_events": GenerateOutlineStep._events_for_subsection(
-                    events, count, index
+                "key_events": [event],
+                "start_state": (
+                    "Begin after the cumulative recent_context."
+                    if previous_event is None
+                    else (
+                        "The previous outcome is already complete: "
+                        f"{previous_event['description']}"
+                    )
                 ),
-            }
-            for index in range(1, count + 1)
-        ]
+                "state_change": event,
+                "end_state": (
+                    f"Complete '{event['description']}' and hand off to "
+                    f"'{next_event['description']}'."
+                    if next_event is not None
+                    else (
+                        f"Complete '{event['description']}' and establish the next "
+                        "section state."
+                    )
+                ),
+                "planned_state_updates": {
+                    "character_locations": [],
+                    "possessions": [],
+                    "known_information": [event["description"]],
+                    "relationship_changes": [],
+                    "introduced_entities": [],
+                    "opened_thread_ids": [],
+                    "resolved_thread_ids": [],
+                    "planted_clue_ids": [],
+                    "paid_off_clue_ids": [],
+                    "character_arc_changes": [],
+                    "resulting_state_summary": (
+                        f"The story has completed {event['description']}"
+                    ),
+                },
+                "must_not_repeat": [
+                    "Do not restart prior setup.",
+                    (
+                        "Do not replay the previous section."
+                        if previous_event is None
+                        else f"Do not replay '{previous_event['description']}'."
+                    ),
+                ],
+            })
+        return subsections
 
     @staticmethod
     def _normalize_block_ids(
@@ -1077,6 +1727,48 @@ class GenerateSectionsStep(Step):
             block["block_id"] = (
                 f"b-{chapter_no}-{section_no}-{subsection_no}-{index:03d}"
             )
+
+    @staticmethod
+    def _merge_state_updates(
+        accumulated: dict[str, Any] | None,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        if accumulated is None:
+            accumulated = {
+                "character_locations": [],
+                "possessions": [],
+                "known_information": [],
+                "relationship_changes": [],
+                "introduced_entities": [],
+                "unresolved_plot_threads": [],
+                "resolved_plot_threads": [],
+                "completed_event_ids": [],
+                "continuity_summary": updates["continuity_summary"],
+            }
+
+        for field, identity_key in (
+            ("character_locations", "character_id"),
+            ("possessions", "character_id"),
+            ("introduced_entities", "entity_id"),
+        ):
+            by_identity = {
+                item[identity_key]: item for item in accumulated[field]
+            }
+            by_identity.update({item[identity_key]: item for item in updates[field]})
+            accumulated[field] = list(by_identity.values())
+
+        for field in (
+            "known_information",
+            "relationship_changes",
+            "unresolved_plot_threads",
+            "resolved_plot_threads",
+            "completed_event_ids",
+        ):
+            accumulated[field] = list(
+                dict.fromkeys([*accumulated[field], *updates[field]])
+            )
+        accumulated["continuity_summary"] = updates["continuity_summary"]
+        return accumulated
 
     def _write_rejected(
         self,
@@ -1135,6 +1827,10 @@ class GenerateSectionsStep(Step):
         section = payload.get("section")
         state_after = payload.get("state_after")
         try:
+            self._restore_target_identity(section, chapter, target_section)
+            self._normalize_character_state_updates(
+                section, valid_character_ids
+            )
             validator.validate(
                 schema_name=self.schema_name,
                 section="output",
@@ -1160,9 +1856,74 @@ class GenerateSectionsStep(Step):
                 "section_no": target_section["section_no"],
             }:
                 raise ValueError("Checkpoint state does not match its generated section")
+            expected_subsection = int(
+                Path(path).stem.rsplit("-subsection-", 1)[-1]
+            ) if "-subsection-" in Path(path).stem else 1
+            if state_after["current_subsection"] != expected_subsection:
+                raise ValueError("Checkpoint state does not match its generated subsection")
         except (KeyError, TypeError, ValueError):
             return None
         return section, state_after
+
+    @classmethod
+    def _validate_forward_progress(
+        cls,
+        generated_section: dict[str, Any],
+        *,
+        previous_state: dict[str, Any],
+        target_section: dict[str, Any],
+    ) -> None:
+        completed_event_ids = {
+            item["event_id"] for item in previous_state.get("occurred_events", [])
+        }
+        target_event_ids = {
+            event["event_id"] for event in target_section["key_events"]
+        }
+        repeated_event_ids = target_event_ids & completed_event_ids
+        if repeated_event_ids:
+            raise ValueError(
+                "Subsection target attempts to replay completed events: "
+                f"{sorted(repeated_event_ids)}"
+            )
+
+        body_text = "".join(
+            str(block.get("text", ""))
+            for block in generated_section.get("narrative_blocks", [])
+        )
+        normalized_body = re.sub(r"\s+", "", body_text).casefold()
+        leaked_event_ids = {
+            event_id
+            for event_id in completed_event_ids | target_event_ids
+            if re.sub(r"\s+", "", event_id).casefold() in normalized_body
+        }
+        if leaked_event_ids:
+            raise ValueError(
+                "Subsection body exposes internal event IDs: "
+                f"{sorted(leaked_event_ids)}"
+            )
+
+        previous_summary = previous_state.get("recent_context")
+        current_summary = generated_section["state_updates"]["continuity_summary"]
+        if previous_summary and cls._text_similarity(
+            previous_summary, current_summary
+        ) >= 0.92:
+            raise ValueError(
+                "Continuity summary is too similar to the previous scene; the "
+                "subsection must create a new state instead of replaying it"
+            )
+
+    @staticmethod
+    def _text_similarity(left: str, right: str) -> float:
+        def trigrams(value: str) -> set[str]:
+            normalized = re.sub(r"\s+", "", value).casefold()
+            if len(normalized) < 3:
+                return {normalized} if normalized else set()
+            return {normalized[index:index + 3] for index in range(len(normalized) - 2)}
+
+        left_parts = trigrams(left)
+        right_parts = trigrams(right)
+        union = left_parts | right_parts
+        return len(left_parts & right_parts) / len(union) if union else 1.0
 
     @staticmethod
     def _section_metrics(section: dict[str, Any]) -> dict[str, int]:
@@ -1256,6 +2017,37 @@ class GenerateSectionsStep(Step):
         temp_path.replace(path)
 
     @staticmethod
+    def _normalize_character_state_updates(
+        generated: dict[str, Any], valid_character_ids: set[str]
+    ) -> set[str]:
+        """Keep dynamic NPCs as entities, not canonical character-state keys."""
+        updates = generated["state_updates"]
+        removed = {
+            item["character_id"]
+            for field in ("character_locations", "possessions")
+            for item in updates[field]
+            if item["character_id"] not in valid_character_ids
+        }
+        for field in ("character_locations", "possessions"):
+            updates[field] = [
+                item
+                for item in updates[field]
+                if item["character_id"] in valid_character_ids
+            ]
+        return removed
+
+    @staticmethod
+    def _restore_target_identity(
+        generated: dict[str, Any],
+        chapter: dict[str, Any],
+        section: dict[str, Any],
+    ) -> None:
+        """Keep outline identity authoritative over prose-model paraphrases."""
+        generated["chapter_no"] = chapter["chapter_no"]
+        generated["section_no"] = section["section_no"]
+        generated["section_title"] = section["section_title"]
+
+    @staticmethod
     def _validate_target(
         generated: dict[str, Any],
         chapter: dict[str, Any],
@@ -1296,7 +2088,10 @@ class GenerateDialogueTagsStep(Step):
                 profile = profiles[speaker_id]
                 expression, reason = self._infer_expression(
                     str(block["text"]),
-                    profile["emotion_model"]["available_expressions"],
+                    profile["emotion_model"].get(
+                        "preferred_expressions",
+                        profile["emotion_model"]["available_expressions"],
+                    ),
                 )
                 tags.append(
                     {
@@ -1469,8 +2264,12 @@ class RenderHtmlStep(Step):
         )
 
 
-def build_minimal_steps() -> list[Step]:
-    return [
+def build_minimal_steps(
+    *,
+    include_planning_input_generation: bool = False,
+    include_scenario_review: bool = False,
+) -> list[Step]:
+    steps: list[Step] = [
         GenerateCharacterProfilesStep(),
         GenerateOutlineStep(),
         GenerateCharacterImagesStep(),
@@ -1478,3 +2277,16 @@ def build_minimal_steps() -> list[Step]:
         GenerateDialogueTagsStep(),
         RenderHtmlStep(),
     ]
+    if include_scenario_review:
+        from .scenario_review import ReviewOutlineStep, ReviewSectionsStep
+
+        steps.insert(2, ReviewOutlineStep())
+        sections_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.name == "step-04-generate-sections"
+        )
+        steps.insert(sections_index + 1, ReviewSectionsStep())
+    if include_planning_input_generation:
+        steps.insert(0, GeneratePlanningInputStep())
+    return steps

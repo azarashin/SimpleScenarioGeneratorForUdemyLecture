@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .consistency import PipelineConsistencyChecker
+from .errors import is_non_retryable_provider_error
 from .state import RunStateStore, StepState
 from .schema_validation import StepSchemaValidator
 from .types import Step, StepContext, StepResult
@@ -46,6 +47,7 @@ class StepExecutionEngine:
     def run(self, context: StepContext, options: ExecutionOptions | None = None) -> dict[str, object]:
         opts = options or ExecutionOptions()
         context.force = opts.force
+        context.paused_after_step = None
         step_names = {step.name for step in self.steps}
         if opts.from_step is not None and opts.from_step not in step_names:
             raise RuntimeError(f"Unknown from-step: {opts.from_step}")
@@ -103,6 +105,9 @@ class StepExecutionEngine:
                             "reason": "already_completed",
                         }
                     )
+                    if step.requires_review_after_success(context):
+                        self._pause_for_review(step, context)
+                        break
                     continue
 
             success = self._run_single_step(step=step, context=context)
@@ -125,7 +130,25 @@ class StepExecutionEngine:
                     f"Trace log: {trace_path}"
                 )
 
+            if step.requires_review_after_success(context):
+                self._pause_for_review(step, context)
+                break
+
         return context.shared_data
+
+    @staticmethod
+    def _pause_for_review(step: Step, context: StepContext) -> None:
+        context.paused_after_step = step.name
+        context.trace_logger.log(
+            {
+                "run_id": context.run_id,
+                "step": step.name,
+                "event": "pipeline_paused_for_review",
+                "artifact_path": str(
+                    Path(context.artifacts_dir) / f"{step.name}.json"
+                ),
+            }
+        )
 
     def _run_single_step(self, step: Step, context: StepContext) -> bool:
         plans = self._build_attempt_plans(context)
@@ -317,10 +340,24 @@ class StepExecutionEngine:
                     }
                 )
 
+                preferred_phase = step.retry_phase_for_error(exc)
+                if self._is_non_retryable_provider_error(exc):
+                    preferred_phase = "none"
+                    context.trace_logger.log(
+                        {
+                            "run_id": context.run_id,
+                            "step": step.name,
+                            "event": "step_retry_skipped",
+                            "attempt": attempts,
+                            "reason": "non_retryable_provider_error",
+                            "provider_error_code": "insufficient_quota",
+                        }
+                    )
+
                 next_index = self._next_plan_index(
                     plans=plans,
                     current_index=plan_index,
-                    preferred_phase=step.retry_phase_for_error(exc),
+                    preferred_phase=preferred_phase,
                 )
                 if next_index is not None:
                     next_plan = plans[next_index]
@@ -342,12 +379,19 @@ class StepExecutionEngine:
         return False
 
     @staticmethod
+    def _is_non_retryable_provider_error(error: Exception) -> bool:
+        """Return true for provider failures that cannot recover through retries."""
+        return is_non_retryable_provider_error(error)
+
+    @staticmethod
     def _next_plan_index(
         *,
         plans: list[AttemptPlan],
         current_index: int,
         preferred_phase: str | None,
     ) -> int | None:
+        if preferred_phase == "none":
+            return None
         remaining = range(current_index + 1, len(plans))
         if preferred_phase is None:
             next_index = current_index + 1

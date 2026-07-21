@@ -30,14 +30,32 @@ class TextGenerationConfig:
 
 
 @dataclass(slots=True)
+class CharacterProfileGenerationConfig:
+    enabled: bool = False
+    require_review: bool = True
+
+
+@dataclass(slots=True)
+class PlanningInputGenerationConfig:
+    enabled: bool = False
+    require_review: bool = True
+
+
+@dataclass(slots=True)
 class ScenarioBodyGenerationConfig:
     subsections_per_section: int = 3
     target_characters: int = 1200
-    min_characters: int = 1000
+    min_characters: int = 850
     max_characters: int = 1600
     min_dialogue_blocks: int = 6
     max_dialogue_blocks: int = 14
     require_event_mentions: bool = True
+
+
+@dataclass(slots=True)
+class ScenarioReviewConfig:
+    enabled: bool = False
+    require_human_review: bool = False
 
 
 @dataclass(slots=True)
@@ -65,9 +83,16 @@ class AppConfig:
     trace_file_name: str = "trace.jsonl"
     image_generation: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
     text_generation: TextGenerationConfig = field(default_factory=TextGenerationConfig)
+    character_profile_generation: CharacterProfileGenerationConfig = field(
+        default_factory=CharacterProfileGenerationConfig
+    )
+    planning_input_generation: PlanningInputGenerationConfig = field(
+        default_factory=PlanningInputGenerationConfig
+    )
     scenario_body_generation: ScenarioBodyGenerationConfig = field(
         default_factory=ScenarioBodyGenerationConfig
     )
+    scenario_review: ScenarioReviewConfig = field(default_factory=ScenarioReviewConfig)
     retry_strategy: RetryStrategyConfig = field(default_factory=RetryStrategyConfig)
     temperature_policy: TemperaturePolicyConfig = field(
         default_factory=TemperaturePolicyConfig
@@ -121,6 +146,14 @@ def _to_default_dict() -> dict[str, Any]:
             "timeout_seconds": DEFAULT_CONFIG.text_generation.timeout_seconds,
             "api_key_env": DEFAULT_CONFIG.text_generation.api_key_env,
         },
+        "character_profile_generation": {
+            "enabled": DEFAULT_CONFIG.character_profile_generation.enabled,
+            "require_review": DEFAULT_CONFIG.character_profile_generation.require_review,
+        },
+        "planning_input_generation": {
+            "enabled": DEFAULT_CONFIG.planning_input_generation.enabled,
+            "require_review": DEFAULT_CONFIG.planning_input_generation.require_review,
+        },
         "scenario_body_generation": {
             "subsections_per_section": (
                 DEFAULT_CONFIG.scenario_body_generation.subsections_per_section
@@ -133,6 +166,10 @@ def _to_default_dict() -> dict[str, Any]:
             "require_event_mentions": (
                 DEFAULT_CONFIG.scenario_body_generation.require_event_mentions
             ),
+        },
+        "scenario_review": {
+            "enabled": DEFAULT_CONFIG.scenario_review.enabled,
+            "require_human_review": DEFAULT_CONFIG.scenario_review.require_human_review,
         },
         "image_generation": {
             "provider": DEFAULT_CONFIG.image_generation.provider,
@@ -166,6 +203,9 @@ def load_config(config_path: str | None) -> AppConfig:
     image_conf = merged.get("image_generation", {})
     text_conf = merged.get("text_generation", {})
     body_conf = merged.get("scenario_body_generation", {})
+    profile_generation_conf = merged.get("character_profile_generation", {})
+    planning_generation_conf = merged.get("planning_input_generation", {})
+    review_conf = merged.get("scenario_review", {})
     retry_conf = merged.get("retry_strategy", {})
     temperature_conf = merged.get("temperature_policy", {})
     image_provider = str(image_conf.get("provider", "")).strip()
@@ -283,6 +323,14 @@ def load_config(config_path: str | None) -> AppConfig:
             timeout_seconds=timeout_seconds,
             api_key_env=api_key_env,
         ),
+        character_profile_generation=CharacterProfileGenerationConfig(
+            enabled=bool(profile_generation_conf.get("enabled", False)),
+            require_review=bool(profile_generation_conf.get("require_review", True)),
+        ),
+        planning_input_generation=PlanningInputGenerationConfig(
+            enabled=bool(planning_generation_conf.get("enabled", False)),
+            require_review=bool(planning_generation_conf.get("require_review", True)),
+        ),
         scenario_body_generation=ScenarioBodyGenerationConfig(
             subsections_per_section=subsections_per_section,
             target_characters=target_characters,
@@ -291,6 +339,10 @@ def load_config(config_path: str | None) -> AppConfig:
             min_dialogue_blocks=min_dialogue_blocks,
             max_dialogue_blocks=max_dialogue_blocks,
             require_event_mentions=bool(body_conf.get("require_event_mentions", True)),
+        ),
+        scenario_review=ScenarioReviewConfig(
+            enabled=bool(review_conf.get("enabled", False)),
+            require_human_review=bool(review_conf.get("require_human_review", False)),
         ),
         retry_strategy=RetryStrategyConfig(
             short_retries=short_retries,
