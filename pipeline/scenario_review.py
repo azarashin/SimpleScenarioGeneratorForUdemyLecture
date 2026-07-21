@@ -6,7 +6,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from .errors import ConsistencyCheckError
+from .errors import ConsistencyCheckError, is_non_retryable_provider_error
+from .scenario_quality import ScenarioBodyQualityChecker
 from .text_generation import _scenario_section_response_schema
 from .types import Step, StepContext, StepResult
 
@@ -616,6 +617,13 @@ class ReviewSectionsStep(Step):
     schema_name = "step-04-review-sections.schema.json"
     input_keys = ("scenario_idea", "character_profiles", "scenario_outline", "scenario_sections")
 
+    def retry_phase_for_error(self, error: Exception) -> str | None:
+        # A post-review consistency failure will reproduce the same full reviewed
+        # output; repeating every section is expensive and provides no new feedback.
+        if isinstance(error, ConsistencyCheckError):
+            return "none"
+        return None
+
     def run(self, context: StepContext) -> StepResult:
         outline_by_location = {
             (chapter["chapter_no"], section["section_no"]): section
@@ -658,39 +666,27 @@ class ReviewSectionsStep(Step):
                 "preserving chapter_no, section_no, section_title, required completed_event_ids, and globally "
                 "unique block IDs. Preserve all durable state_updates facts unless the repair explicitly makes "
                 "one invalid. Continue from PREVIOUS REVIEWED SECTION without resetting its outcome. Only "
+                "report this section's SECTION OUTLINE event IDs in completed_event_ids; never copy completed "
+                "event IDs from PREVIOUS REVIEWED SECTION. "
                 "character IDs in the profiles may speak; render incidental NPC speech as "
                 "narration unless that NPC has a profile. Do not merely describe the repair."
             )
-            response = context.text_generation_provider.generate_json(
+            reviewed_section, report, metrics = self._review_section_unit(
+                context=context,
                 prompt=prompt,
-                model=context.config.text_generation.model,
-                temperature=context.config.temperature_for(self.name),
                 response_schema=response_schema,
-                response_name=f"scenario_section_review_{location[0]}_{location[1]}",
+                location=location,
+                original_section=section,
+                outline_section=outline_section,
+                previous_reviewed_section=previous_reviewed_section,
             )
-            report = response.data["review_report"]
-            if report["repair_scope"] == "outline":
-                problems = "; ".join(item["problem"] for item in report["findings"])
-                raise ValueError(
-                    f"Section review requires outline repair at chapter {location[0]} "
-                    f"section {location[1]}: {problems}"
-                )
-            if not report["passed"]:
-                problems = "; ".join(item["problem"] for item in report["findings"])
-                raise ValueError(
-                    f"Reviewed section still has unresolved issues at chapter "
-                    f"{location[0]} section {location[1]}: {problems}"
-                )
-            sections = response.data["scenario_sections"]
-            if len(sections) != 1:
-                raise ValueError("Section review must return exactly one scenario section")
-            reviewed.append(sections[0])
+            reviewed.append(reviewed_section)
             reports.append(
                 {"chapter_no": location[0], "section_no": location[1], "report": report}
             )
             prompts.append(prompt)
-            input_tokens += response.input_tokens or 0
-            output_tokens += response.output_tokens or 0
+            input_tokens += metrics["input_tokens"]
+            output_tokens += metrics["output_tokens"]
         combined_prompt = "\n\n--- NEXT SECTION REVIEW ---\n\n".join(prompts)
         return StepResult(
             output={"scenario_sections": reviewed, "section_review_reports": reports},
@@ -702,6 +698,236 @@ class ReviewSectionsStep(Step):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
+
+    def _review_section_unit(
+        self,
+        *,
+        context: StepContext,
+        prompt: str,
+        response_schema: dict[str, Any],
+        location: tuple[int, int],
+        original_section: dict[str, Any],
+        outline_section: dict[str, Any],
+        previous_reviewed_section: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, int]]:
+        unit_key = f"chapter-{location[0]:03d}-section-{location[1]:03d}"
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "prompt": prompt,
+                    "model": context.config.text_generation.model,
+                    "schema": response_schema,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        checkpoint_dir = Path(context.artifacts_dir) / "section-review-units"
+        checkpoint_path = checkpoint_dir / f"{unit_key}.json"
+
+        if checkpoint_path.exists() and not context.force:
+            try:
+                checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                if checkpoint.get("fingerprint") == fingerprint:
+                    reviewed, report = self._validate_reviewed_section(
+                        checkpoint["response"],
+                        context=context,
+                        location=location,
+                        original_section=original_section,
+                        outline_section=outline_section,
+                        previous_reviewed_section=previous_reviewed_section,
+                    )
+                    context.trace_logger.log(
+                        {
+                            "run_id": context.run_id,
+                            "step": self.name,
+                            "event": "section_review_unit_checkpoint_loaded",
+                            "unit": unit_key,
+                        }
+                    )
+                    return reviewed, report, {"input_tokens": 0, "output_tokens": 0}
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                context.trace_logger.log(
+                    {
+                        "run_id": context.run_id,
+                        "step": self.name,
+                        "event": "section_review_unit_checkpoint_rejected",
+                        "unit": unit_key,
+                        "failure_reason": str(exc),
+                    }
+                )
+
+        strategy = context.config.retry_strategy
+        phases = ["initial"]
+        phases.extend("short_retry" for _ in range(strategy.short_retries))
+        phases.extend(
+            "prompt_revision" for _ in range(strategy.prompt_revision_retries)
+        )
+        if strategy.fallback_enabled:
+            phases.append("fallback")
+        failure_reason = ""
+        input_tokens = 0
+        output_tokens = 0
+        for attempt, phase in enumerate(phases, start=1):
+            attempt_prompt = prompt
+            if failure_reason:
+                attempt_prompt += (
+                    "\n\nPREVIOUS ATTEMPT VALIDATION FAILURE\n"
+                    f"{failure_reason}\n\nCorrect this exact failure without shortening "
+                    "the section below its accepted range. Return the complete section."
+                )
+            context.trace_logger.log(
+                {
+                    "run_id": context.run_id,
+                    "step": self.name,
+                    "event": "section_review_unit_started",
+                    "unit": unit_key,
+                    "unit_attempt": attempt,
+                    "retry_phase": phase,
+                    "previous_failure_reason": failure_reason or None,
+                }
+            )
+            try:
+                response = context.text_generation_provider.generate_json(
+                    prompt=attempt_prompt,
+                    model=context.config.text_generation.model,
+                    temperature=context.config.temperature_for(self.name),
+                    response_schema=response_schema,
+                    response_name=f"scenario_section_review_{location[0]}_{location[1]}",
+                )
+                input_tokens += response.input_tokens or 0
+                output_tokens += response.output_tokens or 0
+                reviewed, report = self._validate_reviewed_section(
+                    response.data,
+                    context=context,
+                    location=location,
+                    original_section=original_section,
+                    outline_section=outline_section,
+                    previous_reviewed_section=previous_reviewed_section,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if is_non_retryable_provider_error(exc):
+                    raise
+                failure_reason = str(exc)
+                context.trace_logger.log(
+                    {
+                        "run_id": context.run_id,
+                        "step": self.name,
+                        "event": "section_review_unit_failed",
+                        "unit": unit_key,
+                        "unit_attempt": attempt,
+                        "retry_phase": phase,
+                        "failure_reason": failure_reason,
+                    }
+                )
+                continue
+
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            temporary_path = checkpoint_path.with_suffix(".tmp")
+            temporary_path.write_text(
+                json.dumps(
+                    {
+                        "fingerprint": fingerprint,
+                        "response": {
+                            "review_report": report,
+                            "scenario_sections": [reviewed],
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            temporary_path.replace(checkpoint_path)
+            context.trace_logger.log(
+                {
+                    "run_id": context.run_id,
+                    "step": self.name,
+                    "event": "section_review_unit_succeeded",
+                    "unit": unit_key,
+                    "unit_attempt": attempt,
+                    "retry_phase": phase,
+                }
+            )
+            return reviewed, report, {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+
+        raise RuntimeError(
+            f"Section review unit {unit_key} exhausted {len(phases)} attempts. "
+            f"Last error: {failure_reason}"
+        )
+
+    def _validate_reviewed_section(
+        self,
+        data: dict[str, Any],
+        *,
+        context: StepContext,
+        location: tuple[int, int],
+        original_section: dict[str, Any],
+        outline_section: dict[str, Any],
+        previous_reviewed_section: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        report = data["review_report"]
+        if report["repair_scope"] == "outline" or not report["passed"]:
+            problems = "; ".join(item["problem"] for item in report["findings"])
+            raise ValueError(
+                f"Reviewed section has unresolved issues at chapter {location[0]} "
+                f"section {location[1]}: {problems}"
+            )
+        sections = data["scenario_sections"]
+        if len(sections) != 1:
+            raise ValueError("Section review must return exactly one scenario section")
+        reviewed = self._restore_section_contract(
+            sections[0],
+            original_section=original_section,
+            outline_section=outline_section,
+        )
+        previous_block_ids = {
+            block["block_id"]
+            for block in (previous_reviewed_section or {}).get("narrative_blocks", [])
+        }
+        repeated = previous_block_ids.intersection(
+            block["block_id"] for block in reviewed["narrative_blocks"]
+        )
+        if repeated:
+            raise ConsistencyCheckError(
+                f"reviewed section repeats previous block IDs: {sorted(repeated)}"
+            )
+        body = context.config.scenario_body_generation
+        subsection_count = body.subsections_per_section
+        ScenarioBodyQualityChecker().check_section(
+            generated_section=reviewed,
+            outline_section=outline_section,
+            valid_character_ids={
+                profile["character_id"]
+                for profile in context.shared_data["character_profiles"]
+            },
+            min_characters=body.min_characters * subsection_count,
+            max_characters=body.max_characters * subsection_count,
+            min_dialogue_blocks=body.min_dialogue_blocks * subsection_count,
+            max_dialogue_blocks=body.max_dialogue_blocks * subsection_count,
+            require_event_mentions=body.require_event_mentions,
+        )
+        return reviewed, report
+
+    @staticmethod
+    def _restore_section_contract(
+        reviewed_section: dict[str, Any],
+        *,
+        original_section: dict[str, Any],
+        outline_section: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Keep reviewer output bound to the section's immutable plan contract."""
+        restored = deepcopy(reviewed_section)
+        restored["chapter_no"] = original_section["chapter_no"]
+        restored["section_no"] = original_section["section_no"]
+        restored["section_title"] = original_section["section_title"]
+        restored["state_updates"]["completed_event_ids"] = [
+            event["event_id"] for event in outline_section["key_events"]
+        ]
+        return restored
 
     def requires_review_after_success(self, context: StepContext) -> bool:
         return context.config.scenario_review.require_human_review

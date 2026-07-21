@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .consistency import PipelineConsistencyChecker
+from .errors import is_non_retryable_provider_error
 from .state import RunStateStore, StepState
 from .schema_validation import StepSchemaValidator
 from .types import Step, StepContext, StepResult
@@ -339,10 +340,24 @@ class StepExecutionEngine:
                     }
                 )
 
+                preferred_phase = step.retry_phase_for_error(exc)
+                if self._is_non_retryable_provider_error(exc):
+                    preferred_phase = "none"
+                    context.trace_logger.log(
+                        {
+                            "run_id": context.run_id,
+                            "step": step.name,
+                            "event": "step_retry_skipped",
+                            "attempt": attempts,
+                            "reason": "non_retryable_provider_error",
+                            "provider_error_code": "insufficient_quota",
+                        }
+                    )
+
                 next_index = self._next_plan_index(
                     plans=plans,
                     current_index=plan_index,
-                    preferred_phase=step.retry_phase_for_error(exc),
+                    preferred_phase=preferred_phase,
                 )
                 if next_index is not None:
                     next_plan = plans[next_index]
@@ -362,6 +377,11 @@ class StepExecutionEngine:
                 break
 
         return False
+
+    @staticmethod
+    def _is_non_retryable_provider_error(error: Exception) -> bool:
+        """Return true for provider failures that cannot recover through retries."""
+        return is_non_retryable_provider_error(error)
 
     @staticmethod
     def _next_plan_index(

@@ -58,6 +58,44 @@ def test_section_generation_restores_immutable_target_identity() -> None:
     }
 
 
+def test_section_generation_keeps_dynamic_npcs_out_of_character_state() -> None:
+    generated = {
+        "state_updates": {
+            "character_locations": [
+                {"character_id": "c001", "location": "office"},
+                {
+                    "character_id": "char_mizuno_former_guard",
+                    "location": "safe house",
+                },
+            ],
+            "possessions": [
+                {"character_id": "char_mizuno_former_guard", "items": ["key"]}
+            ],
+            "introduced_entities": [
+                {
+                    "entity_id": "char_mizuno_former_guard",
+                    "type": "character",
+                    "name": "元警備員・水野",
+                    "description": "正式プロフィールを持たない臨時NPC。",
+                }
+            ],
+        }
+    }
+
+    removed = GenerateSectionsStep._normalize_character_state_updates(
+        generated, {"c001"}
+    )
+
+    assert removed == {"char_mizuno_former_guard"}
+    assert generated["state_updates"]["character_locations"] == [
+        {"character_id": "c001", "location": "office"}
+    ]
+    assert generated["state_updates"]["possessions"] == []
+    assert generated["state_updates"]["introduced_entities"][0][
+        "entity_id"
+    ] == "char_mizuno_former_guard"
+
+
 class InvalidFormatOnceProvider(TextGenerationProvider):
     def __init__(self) -> None:
         self.delegate = ScenarioBodyMockTextGenerationProvider()

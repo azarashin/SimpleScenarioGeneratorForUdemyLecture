@@ -16,7 +16,11 @@ from pipeline.consistency import ConsistencyCheckError, PipelineConsistencyCheck
 from pipeline.engine import AttemptPlan, ExecutionOptions, StepExecutionEngine
 from pipeline.prompt_impact import PromptImpactReporter
 from pipeline.prompts import PromptCatalog
-from pipeline.scenario_review import ReviewOutlineStep, _inline_common_refs
+from pipeline.scenario_review import (
+    ReviewOutlineStep,
+    ReviewSectionsStep,
+    _inline_common_refs,
+)
 from pipeline.steps import (
     GeneratePlanningInputStep,
     GenerateCharacterProfilesStep,
@@ -275,7 +279,7 @@ def test_p1_config_default_and_partial_override(tmp_path: Path) -> None:
     assert conf.image_generation.api_key_env == "OPENAI_API_KEY"
     assert conf.scenario_body_generation.subsections_per_section == 3
     assert conf.scenario_body_generation.target_characters == 1200
-    assert conf.scenario_body_generation.min_characters == 900
+    assert conf.scenario_body_generation.min_characters == 850
     assert conf.scenario_body_generation.max_characters == 1600
     assert conf.character_profile_generation.enabled is False
     assert conf.character_profile_generation.require_review is True
@@ -507,6 +511,64 @@ def test_non_retryable_unit_failure_stops_outer_step_retry() -> None:
         current_index=0,
         preferred_phase="none",
     ) is None
+    assert ReviewSectionsStep().retry_phase_for_error(
+        ConsistencyCheckError("reviewed section is too short")
+    ) == "none"
+
+
+def test_insufficient_quota_is_non_retryable_but_rate_limit_is_retryable() -> None:
+    class ProviderError(RuntimeError):
+        def __init__(self, code: str) -> None:
+            super().__init__(f"provider failed: {{'code': '{code}'}}")
+            self.code = code
+            self.body = {"error": {"code": code}}
+
+    assert StepExecutionEngine._is_non_retryable_provider_error(
+        ProviderError("insufficient_quota")
+    )
+    assert not StepExecutionEngine._is_non_retryable_provider_error(
+        ProviderError("rate_limit_exceeded")
+    )
+
+
+def test_section_review_restores_section_specific_completed_event_ids() -> None:
+    original = {
+        "chapter_no": 1,
+        "section_no": 2,
+        "section_title": "時計が止まった時刻",
+    }
+    reviewed = {
+        "chapter_no": 1,
+        "section_no": 2,
+        "section_title": "reviewer changed title",
+        "state_updates": {
+            "completed_event_ids": [
+                "phase-1-beat-1",
+                "phase-1-beat-2",
+                "phase-1-beat-3",
+            ]
+        },
+    }
+    outline = {
+        "key_events": [
+            {"event_id": "phase-2-beat-1"},
+            {"event_id": "phase-2-beat-2"},
+            {"event_id": "phase-2-beat-3"},
+        ]
+    }
+
+    restored = ReviewSectionsStep._restore_section_contract(
+        reviewed,
+        original_section=original,
+        outline_section=outline,
+    )
+
+    assert restored["section_title"] == "時計が止まった時刻"
+    assert restored["state_updates"]["completed_event_ids"] == [
+        "phase-2-beat-1",
+        "phase-2-beat-2",
+        "phase-2-beat-3",
+    ]
 
 
 def test_outline_review_aligns_thread_lifecycle_to_ledger_events() -> None:

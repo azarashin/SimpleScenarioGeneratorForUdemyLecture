@@ -165,7 +165,7 @@ OpenAI Responses APIを使用する場合は、`requirements.txt` の依存関�
   "scenario_body_generation": {
     "subsections_per_section": 3,
     "target_characters": 1200,
-    "min_characters": 900,
+    "min_characters": 850,
     "max_characters": 1600,
     "min_dialogue_blocks": 6,
     "max_dialogue_blocks": 14,

@@ -1381,6 +1381,23 @@ class GenerateSectionsStep(Step):
                         self._restore_target_identity(
                             generated_section, chapter, section
                         )
+                        removed_character_ids = (
+                            self._normalize_character_state_updates(
+                                generated_section, valid_character_ids
+                            )
+                        )
+                        if removed_character_ids:
+                            context.trace_logger.log(
+                                {
+                                    "run_id": context.run_id,
+                                    "step": self.name,
+                                    "event": "unknown_character_state_updates_removed",
+                                    "chapter_no": chapter["chapter_no"],
+                                    "section_no": section["section_no"],
+                                    "subsection_no": subsection_no,
+                                    "character_ids": sorted(removed_character_ids),
+                                }
+                            )
                         self._validate_target(generated_section, chapter, section)
                         self._normalize_block_ids(
                             generated_section,
@@ -1461,6 +1478,25 @@ class GenerateSectionsStep(Step):
                                     self._restore_target_identity(
                                         repaired_section, chapter, section
                                     )
+                                    removed_character_ids = (
+                                        self._normalize_character_state_updates(
+                                            repaired_section, valid_character_ids
+                                        )
+                                    )
+                                    if removed_character_ids:
+                                        context.trace_logger.log(
+                                            {
+                                                "run_id": context.run_id,
+                                                "step": self.name,
+                                                "event": "unknown_character_state_updates_removed",
+                                                "chapter_no": chapter["chapter_no"],
+                                                "section_no": section["section_no"],
+                                                "subsection_no": subsection_no,
+                                                "character_ids": sorted(
+                                                    removed_character_ids
+                                                ),
+                                            }
+                                        )
                                     self._validate_target(
                                         repaired_section, chapter, section
                                     )
@@ -1792,6 +1828,9 @@ class GenerateSectionsStep(Step):
         state_after = payload.get("state_after")
         try:
             self._restore_target_identity(section, chapter, target_section)
+            self._normalize_character_state_updates(
+                section, valid_character_ids
+            )
             validator.validate(
                 schema_name=self.schema_name,
                 section="output",
@@ -1976,6 +2015,26 @@ class GenerateSectionsStep(Step):
             encoding="utf-8",
         )
         temp_path.replace(path)
+
+    @staticmethod
+    def _normalize_character_state_updates(
+        generated: dict[str, Any], valid_character_ids: set[str]
+    ) -> set[str]:
+        """Keep dynamic NPCs as entities, not canonical character-state keys."""
+        updates = generated["state_updates"]
+        removed = {
+            item["character_id"]
+            for field in ("character_locations", "possessions")
+            for item in updates[field]
+            if item["character_id"] not in valid_character_ids
+        }
+        for field in ("character_locations", "possessions"):
+            updates[field] = [
+                item
+                for item in updates[field]
+                if item["character_id"] in valid_character_ids
+            ]
+        return removed
 
     @staticmethod
     def _restore_target_identity(

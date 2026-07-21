@@ -205,7 +205,7 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
         target_match = re.search(
             r"Aim for approximately (\d+) non-whitespace characters", prompt
         )
-        min_characters = int(character_match.group(1)) if character_match else 900
+        min_characters = int(character_match.group(1)) if character_match else 850
         max_characters = int(character_match.group(2)) if character_match else 1600
         requested_target = int(target_match.group(1)) if target_match else 1200
         dialogue_characters = sum(
