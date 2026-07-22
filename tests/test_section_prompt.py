@@ -45,6 +45,9 @@ def test_section_prompt_contains_all_generation_inputs(make_context) -> None:
         event["description"] in prompt.text for event in section["key_events"]
     )
     assert section["participating_characters"][0] in prompt.text
+    assert section["scene_location"] in prompt.text
+    assert section["scene_activity"] in prompt.text
+    assert "participant_presence are binding" in prompt.text
     assert "the key is missing" in prompt.text
     assert "scenario-sections.schema.json" in prompt.text
     assert "narration requires speaker_id=null" in prompt.text

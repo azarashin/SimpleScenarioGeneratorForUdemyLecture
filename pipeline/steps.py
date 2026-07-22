@@ -347,6 +347,8 @@ class GenerateOutlineStep(Step):
         )
 
         chapters = []
+        appeared_character_ids: set[str] = set()
+        last_planned_locations: dict[str, str] = {}
         for chapter_no in range(1, target["chapter_count"] + 1):
             sections = []
             for section_no in range(1, target["sections_per_chapter"] + 1):
@@ -433,15 +435,56 @@ class GenerateOutlineStep(Step):
                             ],
                         }
                     )
+                participants = participation[(chapter_no, section_no)]
+                scene_location = (
+                    "Establish a concrete story location during outline review"
+                )
+                participant_presence = []
+                for character_id in participants:
+                    first_appearance = character_id not in appeared_character_ids
+                    prior_location = last_planned_locations.get(character_id)
+                    participant_presence.append(
+                        {
+                            "character_id": character_id,
+                            "presence_mode": "in_person",
+                            "first_appearance": first_appearance,
+                            "location_status_before": (
+                                "not_introduced"
+                                if first_appearance
+                                else ("known" if prior_location else "unknown")
+                            ),
+                            "location_before": prior_location,
+                            "entry_explanation": (
+                                "Establish this character's first appearance and reason "
+                                "for being present in the reviewed outline."
+                                if first_appearance
+                                else "Establish how this previously introduced character "
+                                "joins or remains in the scene."
+                            ),
+                            "scene_role": (
+                                "Establish this character's distinct function in the scene"
+                            ),
+                            "current_activity": (
+                                "Establish what this character is doing during the scene"
+                            ),
+                            "participation_status": "active",
+                        }
+                    )
+                    appeared_character_ids.add(character_id)
+                    last_planned_locations[character_id] = scene_location
                 sections.append(
                     {
                         "section_no": section_no,
                         "section_title": f"Section {chapter_no}-{section_no}",
                         "section_purpose": purpose,
+                        "scene_location": scene_location,
+                        "scene_activity": (
+                            "Establish the concrete action currently unfolding during review"
+                        ),
+                        "scene_phase": "Establish the scene's narrative phase during review",
                         "key_events": key_events,
-                        "participating_characters": participation[
-                            (chapter_no, section_no)
-                        ],
+                        "participating_characters": participants,
+                        "participant_presence": participant_presence,
                         "subsections": subsections,
                     }
                 )
@@ -1285,10 +1328,14 @@ class GenerateSectionsStep(Step):
                         "section_no": section["section_no"],
                         "section_title": section["section_title"],
                         "section_purpose": subsection["subsection_purpose"],
+                        "scene_location": section["scene_location"],
+                        "scene_activity": section["scene_activity"],
+                        "scene_phase": section["scene_phase"],
                         "key_events": subsection["key_events"],
                         "participating_characters": section[
                             "participating_characters"
                         ],
+                        "participant_presence": section["participant_presence"],
                         # Keep the active contract attached for compact plan-progress
                         # accounting after the generated prose passes validation.
                         "subsections": [subsection],

@@ -75,8 +75,12 @@
                                 "section_no",
                                 "section_title",
                                 "section_purpose",
+                                "scene_location",
+                                "scene_activity",
+                                "scene_phase",
                                 "key_events",
-                                "participating_characters"
+                                "participating_characters",
+                                "participant_presence"
                             ],
                             "additionalProperties": false,
                             "properties": {
@@ -87,6 +91,15 @@
                                     "$ref": "common.schema.json#/$defs/nonEmptyString"
                                 },
                                 "section_purpose": {
+                                    "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                },
+                                "scene_location": {
+                                    "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                },
+                                "scene_activity": {
+                                    "$ref": "common.schema.json#/$defs/nonEmptyString"
+                                },
+                                "scene_phase": {
                                     "$ref": "common.schema.json#/$defs/nonEmptyString"
                                 },
                                 "key_events": {
@@ -101,6 +114,13 @@
                                     "minItems": 1,
                                     "items": {
                                         "$ref": "common.schema.json#/$defs/characterId"
+                                    }
+                                },
+                                "participant_presence": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {
+                                        "$ref": "#/$defs/participantPresence"
                                     }
                                 },
                                 "subsections": {
@@ -167,6 +187,34 @@
         }
     },
     "$defs": {
+        "participantPresence": {
+            "type": "object",
+            "required": [
+                "character_id",
+                "presence_mode",
+                "first_appearance",
+                "location_status_before",
+                "location_before",
+                "entry_explanation",
+                "scene_role",
+                "current_activity",
+                "participation_status"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "character_id": {"$ref": "common.schema.json#/$defs/characterId"},
+                "presence_mode": {"enum": ["in_person", "remote"]},
+                "first_appearance": {"type": "boolean"},
+                "location_status_before": {"enum": ["not_introduced", "known", "unknown"]},
+                "location_before": {"type": ["string", "null"]},
+                "entry_explanation": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                "scene_role": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                "current_activity": {"$ref": "common.schema.json#/$defs/nonEmptyString"},
+                "participation_status": {
+                    "enum": ["active", "observing", "waiting", "incapacitated"]
+                }
+            }
+        },
         "plannedPlotThread": {
             "type": "object",
             "required": ["thread_id", "description", "open_event_id", "resolve_event_id"],

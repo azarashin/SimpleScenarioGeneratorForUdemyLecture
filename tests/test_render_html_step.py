@@ -59,6 +59,9 @@ def test_render_html_step_writes_pages_and_manifest(make_context):
                                 "section_no": 1,
                                 "section_title": "雨",
                                 "section_purpose": "出会う",
+                                "scene_location": "office",
+                                "scene_activity": "Discussing the case.",
+                                "scene_phase": "setup",
                                 "key_events": [
                                     {
                                         "event_id": "phase-1-beat-1",
@@ -66,6 +69,19 @@ def test_render_html_step_writes_pages_and_manifest(make_context):
                                     }
                                 ],
                                 "participating_characters": ["c001"],
+                                "participant_presence": [
+                                    {
+                                        "character_id": "c001",
+                                        "presence_mode": "in_person",
+                                        "first_appearance": True,
+                                        "location_status_before": "not_introduced",
+                                        "location_before": None,
+                                        "entry_explanation": "The character begins here.",
+                                        "scene_role": "speaker",
+                                        "current_activity": "Discussing the case.",
+                                        "participation_status": "active",
+                                    }
+                                ],
                             }
                         ],
                     }
@@ -151,6 +167,9 @@ def test_render_html_step_auto_loads_generated_json_and_image_assets(make_contex
                                 "section_no": 1,
                                 "section_title": "雨",
                                 "section_purpose": "出会う",
+                                "scene_location": "office",
+                                "scene_activity": "Discussing the case.",
+                                "scene_phase": "setup",
                                 "key_events": [
                                     {
                                         "event_id": "phase-1-beat-1",
@@ -158,6 +177,19 @@ def test_render_html_step_auto_loads_generated_json_and_image_assets(make_contex
                                     }
                                 ],
                                 "participating_characters": ["c001"],
+                                "participant_presence": [
+                                    {
+                                        "character_id": "c001",
+                                        "presence_mode": "in_person",
+                                        "first_appearance": True,
+                                        "location_status_before": "not_introduced",
+                                        "location_before": None,
+                                        "entry_explanation": "The character begins here.",
+                                        "scene_role": "speaker",
+                                        "current_activity": "Discussing the case.",
+                                        "participation_status": "active",
+                                    }
+                                ],
                             }
                         ],
                     }

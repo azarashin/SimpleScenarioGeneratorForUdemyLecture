@@ -24,6 +24,36 @@ class ScenarioBodyQualityChecker:
             f"section {generated_section['section_no']}"
         )
         participants = set(outline_section["participating_characters"])
+        location_updates = {
+            item["character_id"]: item["location"]
+            for item in generated_section["state_updates"]["character_locations"]
+        }
+        expected_in_person = {
+            item["character_id"]
+            for item in outline_section["participant_presence"]
+            if item["presence_mode"] == "in_person"
+        }
+        missing_locations = expected_in_person - set(location_updates)
+        if missing_locations:
+            self._fail(
+                f"{location} does not record scene location for in-person characters: "
+                f"{sorted(missing_locations)}"
+            )
+        wrong_locations = {
+            character_id: location_updates[character_id]
+            for character_id in expected_in_person
+            if location_updates[character_id] != outline_section["scene_location"]
+        }
+        if wrong_locations:
+            self._fail(
+                f"{location} places in-person characters outside scene_location "
+                f"{outline_section['scene_location']!r}: {wrong_locations}"
+            )
+        incapacitated = {
+            item["character_id"]
+            for item in outline_section["participant_presence"]
+            if item["participation_status"] == "incapacitated"
+        }
         narration_count = 0
         dialogue_count = 0
         text_parts: list[str] = []
@@ -37,6 +67,10 @@ class ScenarioBodyQualityChecker:
                 self._fail(f"unknown speaker {speaker_id!r} at {location}")
             if speaker_id is not None and speaker_id not in participants:
                 self._fail(f"speaker {speaker_id!r} is not a participant at {location}")
+            if speaker_id in incapacitated:
+                self._fail(
+                    f"incapacitated character {speaker_id!r} cannot speak at {location}"
+                )
 
         if narration_count == 0 or dialogue_count == 0:
             self._fail(f"{location} must contain narration and dialogue")

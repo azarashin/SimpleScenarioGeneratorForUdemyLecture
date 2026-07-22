@@ -394,6 +394,8 @@ def test_outline_review_prompt_requires_narratively_earned_introductions() -> No
     assert "reason the character is present" in prompt
     assert "premature participation" in prompt
     assert "does not make the character a scene participant" in prompt
+    assert "participant_presence" in prompt
+    assert "location_status_before" in prompt
 
 
 def test_outline_review_restores_chapter_section_and_event_identity() -> None:
@@ -431,8 +433,24 @@ def test_outline_review_restores_chapter_section_and_event_identity() -> None:
                 "section_no": 6,
                 "section_title": "Section",
                 "section_purpose": "Purpose",
+                "scene_location": "office",
+                "scene_activity": "The protagonist reviews the case.",
+                "scene_phase": "setup",
                 "key_events": [deepcopy(event)],
                 "participating_characters": ["c001"],
+                "participant_presence": [
+                    {
+                        "character_id": "c001",
+                        "presence_mode": "in_person",
+                        "first_appearance": True,
+                        "location_status_before": "not_introduced",
+                        "location_before": None,
+                        "entry_explanation": "The protagonist begins in the office.",
+                        "scene_role": "investigator",
+                        "current_activity": "Reviewing the case file.",
+                        "participation_status": "active",
+                    }
+                ],
                 "subsections": [deepcopy(subsection)],
             }
         ],
@@ -774,6 +792,57 @@ def test_minimal_steps_produce_schema_valid_outputs(make_context) -> None:
         for section in outline_sections
         for subsection in section["subsections"]
     )
+    assert all(section["scene_location"] for section in outline_sections)
+    assert all(section["scene_activity"] for section in outline_sections)
+    assert all(section["scene_phase"] for section in outline_sections)
+    assert all(
+        [item["character_id"] for item in section["participant_presence"]]
+        == section["participating_characters"]
+        for section in outline_sections
+    )
+
+
+def test_outline_rejects_inconsistent_character_presence(make_context) -> None:
+    context, _ = make_context()
+    context.shared_data["input"]["scenario_idea"]["target_length"] = {
+        "chapter_count": 1,
+        "sections_per_chapter": 2,
+    }
+    output = StepExecutionEngine(build_minimal_steps()).run(context)
+    outline = deepcopy(output["scenario_outline"])
+    first_presence = outline["chapters"][0]["sections"][0][
+        "participant_presence"
+    ][0]
+    first_presence["first_appearance"] = False
+
+    with pytest.raises(ConsistencyCheckError, match="inconsistent first_appearance"):
+        PipelineConsistencyChecker().check(
+            context.shared_data,
+            {"scenario_outline": outline},
+        )
+
+    outline = deepcopy(output["scenario_outline"])
+    recurring_presence = outline["chapters"][0]["sections"][1][
+        "participant_presence"
+    ][0]
+    recurring_presence["location_status_before"] = "known"
+    recurring_presence["location_before"] = "an impossible prior location"
+
+    with pytest.raises(ConsistencyCheckError, match="does not match last in-person"):
+        PipelineConsistencyChecker().check(
+            context.shared_data,
+            {"scenario_outline": outline},
+        )
+
+    outline = deepcopy(output["scenario_outline"])
+    for item in outline["chapters"][0]["sections"][0]["participant_presence"]:
+        item["participation_status"] = "observing"
+
+    with pytest.raises(ConsistencyCheckError, match="at least one active participant"):
+        PipelineConsistencyChecker().check(
+            context.shared_data,
+            {"scenario_outline": outline},
+        )
 
 
 def test_scenario_body_quality_checks_length_and_required_events(make_context) -> None:
@@ -824,6 +893,16 @@ def test_scenario_body_quality_checks_length_and_required_events(make_context) -
         PipelineConsistencyChecker().check(
             consistency_data,
             {"scenario_sections": missing_event_output["scenario_sections"]},
+        )
+
+    missing_location_output = deepcopy(output)
+    missing_location_output["scenario_sections"][0]["state_updates"][
+        "character_locations"
+    ] = []
+    with pytest.raises(ConsistencyCheckError, match="does not record scene location"):
+        PipelineConsistencyChecker().check(
+            consistency_data,
+            {"scenario_sections": missing_location_output["scenario_sections"]},
         )
 
 

@@ -219,6 +219,14 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
         )
         if padding_needed:
             narration += " " + ("x" * padding_needed)
+        character_locations = [
+            {
+                "character_id": item["character_id"],
+                "location": section["scene_location"],
+            }
+            for item in section["participant_presence"]
+            if item["presence_mode"] == "in_person"
+        ]
         payload = {
             "scenario_sections": [
                 {
@@ -235,7 +243,7 @@ class ScenarioBodyMockTextGenerationProvider(TextGenerationProvider):
                         *dialogue_blocks,
                     ],
                     "state_updates": {
-                        "character_locations": [],
+                        "character_locations": character_locations,
                         "possessions": [],
                         "known_information": [events],
                         "relationship_changes": [],

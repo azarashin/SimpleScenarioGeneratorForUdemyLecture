@@ -384,6 +384,8 @@ class PipelineConsistencyChecker:
         valid_characters = self._character_ids(data)
         self._check_outline_story_plan(outline, valid_characters)
         first_section_participants: set[str] | None = None
+        introduced_characters: set[str] = set()
+        last_in_person_locations: dict[str, str] = {}
         for chapter in chapters:
             sections = chapter["sections"]
             self._require_sequence(
@@ -406,6 +408,76 @@ class PipelineConsistencyChecker:
                         f"chapter {chapter['chapter_no']} section {section['section_no']} "
                         f"references unknown characters: {sorted(unknown)}"
                     )
+                presence = section["participant_presence"]
+                presence_ids = [item["character_id"] for item in presence]
+                if presence_ids != participant_list:
+                    self._fail(
+                        f"chapter {chapter['chapter_no']} section {section['section_no']} "
+                        "participant_presence must match participating_characters in order"
+                    )
+                if not section["scene_location"].strip():
+                    self._fail(
+                        f"chapter {chapter['chapter_no']} section {section['section_no']} "
+                        "must define a scene location"
+                    )
+                if not section["scene_activity"].strip() or not section[
+                    "scene_phase"
+                ].strip():
+                    self._fail(
+                        f"chapter {chapter['chapter_no']} section {section['section_no']} "
+                        "must define scene activity and phase"
+                    )
+                if not any(
+                    item["participation_status"] == "active" for item in presence
+                ):
+                    self._fail(
+                        f"chapter {chapter['chapter_no']} section {section['section_no']} "
+                        "must have at least one active participant"
+                    )
+                for item in presence:
+                    character_id = item["character_id"]
+                    is_first = character_id not in introduced_characters
+                    if item["first_appearance"] != is_first:
+                        self._fail(
+                            f"character {character_id} has inconsistent first_appearance "
+                            f"at chapter {chapter['chapter_no']} section {section['section_no']}"
+                        )
+                    expected_status = "not_introduced" if is_first else None
+                    if expected_status and item["location_status_before"] != expected_status:
+                        self._fail(
+                            f"character {character_id} must be not_introduced before the "
+                            "first appearance"
+                        )
+                    if not is_first and item["location_status_before"] == "not_introduced":
+                        self._fail(
+                            f"character {character_id} cannot return to not_introduced status"
+                        )
+                    if item["location_status_before"] == "known":
+                        if not item["location_before"] or not item["location_before"].strip():
+                            self._fail(
+                                f"character {character_id} with a known prior location must "
+                                "define location_before"
+                            )
+                        expected_location = last_in_person_locations.get(character_id)
+                        if (
+                            expected_location is not None
+                            and item["location_before"] != expected_location
+                        ):
+                            self._fail(
+                                f"character {character_id} prior location "
+                                f"{item['location_before']!r} does not match last in-person "
+                                f"location {expected_location!r}"
+                            )
+                    elif item["location_before"] is not None:
+                        self._fail(
+                            f"character {character_id} may define location_before only when "
+                            "location_status_before is known"
+                        )
+                    introduced_characters.add(character_id)
+                    if item["presence_mode"] == "in_person":
+                        last_in_person_locations[character_id] = section[
+                            "scene_location"
+                        ]
                 section_event_ids = [
                     event["event_id"] for event in section["key_events"]
                 ]
