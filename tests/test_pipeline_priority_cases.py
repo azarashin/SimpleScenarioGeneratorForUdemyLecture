@@ -380,6 +380,22 @@ def test_outline_review_restores_immutable_title_and_logline() -> None:
     assert reviewed["logline"] == "Canonical premise"
 
 
+def test_outline_review_prompt_requires_narratively_earned_introductions() -> None:
+    prompt = ReviewOutlineStep._chapter_prompt(
+        shared_input={"scenario_idea": {}},
+        profiles=[],
+        story_plan={},
+        previous_chapter=None,
+        draft_chapter={"chapter_no": 1, "sections": []},
+    )
+
+    assert "introductions must feel narratively earned" in prompt
+    assert "first direct conversation" in prompt
+    assert "reason the character is present" in prompt
+    assert "premature participation" in prompt
+    assert "does not make the character a scene participant" in prompt
+
+
 def test_outline_review_restores_chapter_section_and_event_identity() -> None:
     event = {"event_id": "phase-1-beat-1", "description": "Draft event"}
     planned_updates = {

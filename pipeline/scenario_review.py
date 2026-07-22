@@ -511,7 +511,20 @@ class ReviewOutlineStep(Step):
             "resolution, clue plant, clue payoff, and character turning point assigned to "
             "this chapter appears at its declared event ID. Ensure the first state follows "
             "PREVIOUS REVIEWED CHAPTER and later states never replay completed scenes. Do "
-            "not invent an extra central case when PLANNING INPUT assigns cases to chapters."
+            "not invent an extra central case when PLANNING INPUT assigns cases to chapters. "
+            "Character timing does not need to follow an original work or the order of the "
+            "input source, but introductions must feel narratively earned. Introduce major "
+            "characters gradually as the story needs them instead of assembling them all at "
+            "the opening for convenience. Before placing a character in "
+            "participating_characters, establish that character's first appearance in this "
+            "or an earlier event. Give each first appearance and first direct conversation a "
+            "clear story purpose, a reason the character is present, and enough context for "
+            "the audience to understand the current relationship. If already-acquainted "
+            "characters speak at their first on-page meeting, establish or reveal why they "
+            "meet and what their relationship is before or during that event. Repair any "
+            "premature participation, unexplained meeting, or relationship assumed before "
+            "its introduction. A character may be foreshadowed by name or reputation before "
+            "appearing, but that alone does not make the character a scene participant."
         )
 
     @staticmethod
